@@ -149,7 +149,7 @@ func (a *App) Purge() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Purged %d non-existent files in the database\n", count)
+	fmt.Printf("Purged %d files from the database\n", count)
 }
 
 func (a *App) Update() {
@@ -158,7 +158,7 @@ func (a *App) Update() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Updated %d nonfiles in the database\n", count)
+	fmt.Printf("Updated %d files in the database\n", count)
 }
 
 func (a *App) AddPath(path string, recursive bool, filter string) {
@@ -189,7 +189,7 @@ func (a *App) AddPath(path string, recursive bool, filter string) {
 	// remember new amount of indexed files
 	newCount := len(a.index.GetAllFiles())
 	// display changed files
-	fmt.Printf("Added/Updated %d files\n", newCount-currentCount)
+	fmt.Printf("Updated %d files\n", newCount-currentCount)
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

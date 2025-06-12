@@ -23,14 +23,14 @@ func main() {
 	// flags
 	var (
 		addPath        = flag.String("add", "", "Add path to database (example: --add /home/user/documents)")
-		showConfig     = flag.Bool("showconfig", false, "Show configuration")
-		showFiles      = flag.Bool("showfiles", false, "Show all files in database")
-		showDuplicates = flag.Bool("showduplicates", false, "Show all duplicate files in database")
+		showConfig     = flag.Bool("config", false, "Show configuration")
+		showFiles      = flag.Bool("files", false, "Show all files in database")
+		showDuplicates = flag.Bool("dupes", false, "Show all duplicate files in database")
 		scan           = flag.Bool("scan", false, "Scan for duplicates")
 		export         = flag.Bool("export", false, "Export duplicate files to STDOUT (example: --export > duplicates.txt)")
 		purge          = flag.Bool("purge", false, "Remove non-existing files from database")
 		update         = flag.Bool("update", false, "Updates file hashes in the database")
-		quickScan      = flag.String("quickscan", "", "Add path to database and scan for duplicates (example: --quickscan /home/user/photos)")
+		quickScan      = flag.String("sad", "", "Add path to database and scan for duplicates (example: --quickscan /home/user/photos)")
 	)
 	flag.Parse()
 

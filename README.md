@@ -24,50 +24,65 @@ DupeFiles (short: `df`) is a CLI tool that helps you identify duplicate files by
 Ensure you have Go 1.24+ installed, then build the application:
 
 ``` bash
-go build -o dupefiles
+go build -o df
 ```
 
 ## Commands
 
+### Add directory and immediately scan it
+```bash
+./df --sad /path/to/directory
+```
+
 ### Scan for Duplicates
 ```bash
 # Default behavior - scan for duplicates
-./dupefiles
+./df
 
 # Explicit scan command
-./dupefiles --scan
+./df --scan
 ```
 
 ### Add Files to Index
 
 #### Add a single file
 ```bash
-./dupefiles --add /path/to/file.txt
+./df --add /path/to/file.txt
 ```
 
 #### Add a directory (recursive by default)
 ```bash
-./dupefiles --add /path/to/directory
+./df --add /path/to/directory
 ```
 
 #### Add directory with file filter (e.g., only MP4 files)
 ```bash
-./dupefiles --add /path/to/videos *.mp4
+./df --add /path/to/videos *.mp4
 ```
 
 ### Index Management
 
 #### Show configuration (index file location, etc.)
 ```bash
-./dupefiles --showconfig
+./df --config
 ```
 
 #### List all files in the index
 ```bash
-./dupefiles --showfiles
+./df --files
+```
+
+#### List all duplicate files in the index
+```bash
+./df --dupes
+```
+
+#### Update files in the index
+```bash
+./df --update
 ```
 
 #### Remove non-existent files from index
 ```bash
-./dupefiles --purge
+./df --purge
 ```

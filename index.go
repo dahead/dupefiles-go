@@ -369,8 +369,6 @@ func (idx *Index) Update() (int, error) {
 	filesToUpdateInDB := []*FileItem{}
 	guidsToDelete := []string{}
 
-	scanner := NewScanner(idx) // Get a scanner instance for CalculateHash method
-
 	for _, file := range idx.files {
 		fileInfo, err := os.Stat(file.Path)
 		if os.IsNotExist(err) {
@@ -389,7 +387,7 @@ func (idx *Index) Update() (int, error) {
 
 			// Invalidate old hash and recalculate
 			// The CalculateHash method now only returns hash string and error
-			newHashString, errHash := scanner.CalculateFileHash(file.Path, file.Size)
+			newHashString, errHash := CalculateFileHash(file.Path, file.Size)
 
 			if errHash != nil {
 				fmt.Printf("Warning: Failed to calculate hash for updated file %s: %v\n", file.Path, errHash)

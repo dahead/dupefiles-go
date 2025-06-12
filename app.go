@@ -78,7 +78,6 @@ func (a *App) ShowDuplicates() {
 }
 
 func (a *App) Scan() {
-
 	// No files in FileIndex skip
 	files := a.index.GetAllFiles()
 	if len(files) == 0 {
@@ -99,15 +98,34 @@ func (a *App) Scan() {
 		fmt.Println("No duplicate files found")
 	} else {
 		fmt.Printf("Found %d groups of duplicate files:\n", len(results))
+
+		totalDuplicateSize := int64(0)
+		totalDuplicateFiles := 0
+
 		for i, result := range results {
 			fmt.Printf("\nGroup %d (Hash: %s):\n", i+1, result.HashSum)
-			for _, guid := range result.FileGuids {
+			groupSize := int64(0)
+			var firstFile *FileItem
+
+			for j, guid := range result.FileGuids {
 				file := a.index.GetFileByGuid(guid)
 				if file != nil {
+					if firstFile == nil {
+						firstFile = file
+					}
 					fmt.Printf("  %s (%s)\n", file.Path, file.HumanizedSize)
+					if j > 0 { // Count all duplicates except the first (original)
+						totalDuplicateFiles++
+						groupSize += file.Size
+					}
 				}
 			}
+			totalDuplicateSize += groupSize
 		}
+
+		// Summary
+		fmt.Printf("\n# Summary: %d duplicate files in %d groups, %s wasted space\n",
+			totalDuplicateFiles, len(results), HumanizeBytes(totalDuplicateSize))
 	}
 }
 
@@ -129,7 +147,6 @@ func (a *App) Export() {
 	totalFiles := 0
 
 	for i, file := range files {
-		// Für jeden duplicated file
 		totalFiles++
 		groupSize := file.Size // Größe des duplizierten Files
 		totalDuplicateSize += groupSize
@@ -139,7 +156,7 @@ func (a *App) Export() {
 		fmt.Println() // Empty line between groups
 	}
 
-	fmt.Printf("# Summary: %d duplicate files in %d groups, %s wasted\n",
+	fmt.Printf("# Summary: %d duplicate files in %d groups, %s wasted space\n",
 		totalFiles, len(files), HumanizeBytes(totalDuplicateSize))
 }
 

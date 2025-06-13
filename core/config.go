@@ -55,9 +55,9 @@ func NewConfig() *Config {
 		}
 	}
 
-	if config.Debug {
-		fmt.Println("Configuration loaded from environment variables.")
-	}
+	//if config.Debug {
+	//	fmt.Println("Configuration loaded from environment variables. Debug is on.")
+	//}
 
 	// fmt.Println("Configuration loaded from environment variables.")
 	// fmt.Printf("ENV: ", os.Getenv("DF_DEBUG"))

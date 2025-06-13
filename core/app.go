@@ -212,6 +212,10 @@ func (a *App) Export() {
 	totalDuplicateSize := int64(0)
 	totalFiles := 0
 
+	// Todo Export to json
+
+	// Todo Export to csv
+
 	for i, file := range files {
 		totalFiles++
 		groupSize := file.Size // Größe des duplizierten Files
@@ -229,6 +233,93 @@ func (a *App) Export() {
 		totalFiles, len(files), HumanizeBytes(totalDuplicateSize))
 }
 
+func (a *App) ExportToCSV(filename string) {
+	files := a.index.GetAllDupes()
+
+	// No files in FileIndex skip
+	if len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "No duplicate files in database\n")
+		os.Exit(1)
+	}
+	// create output filename
+
+	// add csv headers
+
+	// add csv lines. one line for each duplicate
+
+	// No files in FileIndex skip
+	if len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "No duplicate files in database\n")
+		os.Exit(1)
+	}
+
+	fmt.Printf("# DupeFiles Export - Found %d groups of possible duplicate files\n", len(files))
+	fmt.Printf("# Format: [Group Number] [Hash] [File Count] [Total Size]\n")
+	fmt.Println("#")
+
+	totalDuplicateSize := int64(0)
+	totalFiles := 0
+
+	// Todo Export to json
+
+	// Todo Export to csv
+
+	for i, file := range files {
+		totalFiles++
+		groupSize := file.Size // Größe des duplizierten Files
+		totalDuplicateSize += groupSize
+
+		// Todo: Check printf parameters here. Why "1"?
+		fmt.Printf("[Group %d] %v %d %s\n", i+1, file.Hash, 1, HumanizeBytes(groupSize))
+		fmt.Printf("- %s (%s)\n", file.Path, file.HumanizedSize)
+		fmt.Println() // Empty line between groups
+	}
+
+}
+
+func (a *App) ExportToJson(filename string) {
+	files := a.index.GetAllDupes()
+
+	// No files in FileIndex skip
+	if len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "No duplicate files in database\n")
+		os.Exit(1)
+	}
+
+	// create output filename
+
+	// create json from each duplicate item
+	// Json
+
+	// No files in FileIndex skip
+	if len(files) == 0 {
+		fmt.Fprintf(os.Stderr, "No duplicate files in database\n")
+		os.Exit(1)
+	}
+
+	fmt.Printf("# DupeFiles Export - Found %d groups of possible duplicate files\n", len(files))
+	fmt.Printf("# Format: [Group Number] [Hash] [File Count] [Total Size]\n")
+	fmt.Println("#")
+
+	totalDuplicateSize := int64(0)
+	totalFiles := 0
+
+	// Todo Export to json
+
+	// Todo Export to csv
+
+	for i, file := range files {
+		totalFiles++
+		groupSize := file.Size // Größe des duplizierten Files
+		totalDuplicateSize += groupSize
+
+		// Todo: Check printf parameters here. Why "1"?
+		fmt.Printf("[Group %d] %v %d %s\n", i+1, file.Hash, 1, HumanizeBytes(groupSize))
+		fmt.Printf("- %s (%s)\n", file.Path, file.HumanizedSize)
+		fmt.Println() // Empty line between groups
+	}
+
+}
 func (a *App) PurgeIndex() {
 	count, err := a.index.Purge()
 	if err != nil {

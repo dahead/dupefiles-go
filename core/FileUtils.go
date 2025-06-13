@@ -1,5 +1,5 @@
 // fileutils.go
-package main
+package core
 
 import (
 	"bytes"
@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"hash"
 	"io"
+	"math/rand"
 	"os"
+	"time"
 )
 
 const SizeThreshold = 2 * 1024 * 1024 * 1024 // 2GB
@@ -90,4 +92,58 @@ func CompareFilesBinary(path1, path2 string) (bool, error) {
 			return false, nil
 		}
 	}
+}
+
+func CompareFilesBinaryRandom(path1, path2 string, sampleSize int) (bool, error) {
+	// Get file info first
+	info1, err := os.Stat(path1)
+	if err != nil {
+		return false, err
+	}
+	// Commented out, because we already check this before calling this method
+	//info2, err := os.Stat(path2)
+	//if err != nil {
+	//	return false, err
+	//}
+	//
+	//// Different sizes = not identical
+	//if info1.Size() != info2.Size() {
+	//	return false, nil
+	//}
+
+	// If file is smaller than sample size, compare entire file
+	fileSize := info1.Size()
+	if fileSize <= int64(sampleSize) {
+		return CompareFilesBinary(path1, path2)
+	}
+
+	file1, err := os.Open(path1)
+	if err != nil {
+		return false, err
+	}
+	defer file1.Close()
+
+	file2, err := os.Open(path2)
+	if err != nil {
+		return false, err
+	}
+	defer file2.Close()
+
+	// Generate random positions
+	rand.Seed(time.Now().UnixNano())
+	maxOffset := fileSize - int64(sampleSize)
+	offset := rand.Int63n(maxOffset + 1)
+
+	// Read samples
+	sample1 := make([]byte, sampleSize)
+	sample2 := make([]byte, sampleSize)
+
+	if _, err := file1.ReadAt(sample1, offset); err != nil {
+		return false, err
+	}
+	if _, err := file2.ReadAt(sample2, offset); err != nil {
+		return false, err
+	}
+
+	return bytes.Equal(sample1, sample2), nil
 }

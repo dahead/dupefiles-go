@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"fmt"
@@ -6,11 +6,13 @@ import (
 )
 
 type App struct {
+	Debug  bool
 	index  *Index
 	config *Config
 }
 
 func NewApp() *App {
+	debug := false
 	config := NewConfig()
 	idx, err := NewIndex(config)
 	if err != nil {
@@ -19,6 +21,7 @@ func NewApp() *App {
 	}
 
 	return &App{
+		Debug:  debug,
 		index:  idx,
 		config: config,
 	}
@@ -63,7 +66,7 @@ func (a *App) ShowFiles() {
 	fmt.Printf("Files in database: %d total.\n", len(files))
 }
 
-func (a *App) ShowDuplicates() {
+func (a *App) ShowDupes() {
 	files := a.index.GetDuplicateFiles()
 	if len(files) == 0 {
 		fmt.Println("No duplicate files in database")
@@ -77,6 +80,20 @@ func (a *App) ShowDuplicates() {
 	fmt.Printf("Duplicate files in database: %d total.\n", len(files))
 }
 
+func (a *App) ShowHashes() {
+	files := a.index.GetAllHashedFiles()
+	if len(files) == 0 {
+		fmt.Println("No hashed files in database")
+		return
+	}
+	// show each file path
+	for _, file := range files {
+		fmt.Println(file.Path)
+	}
+	// show totals
+	fmt.Printf("Hashed files in database: %d total.\n", len(files))
+}
+
 func (a *App) Scan() {
 	// No files in FileIndex skip
 	files := a.index.GetAllFiles()
@@ -84,6 +101,8 @@ func (a *App) Scan() {
 		fmt.Println("No files in database")
 		return
 	}
+
+	// Todo: Start a  system timer and measure scan duration
 
 	scanner := NewScanner(a.index)              // Create scanner instance
 	results, err := scanner.ScanForDuplicates() // Call method on scanner
@@ -95,9 +114,10 @@ func (a *App) Scan() {
 
 	// Print results
 	if len(results) == 0 {
-		fmt.Println("No duplicate files found")
+		fmt.Println("No duplicate files found!\n")
 	} else {
-		fmt.Printf("Found %d groups of duplicate files:\n", len(results))
+		fmt.Print()
+		fmt.Printf("Found %d group(s) of duplicate files:\n", len(results))
 
 		totalDuplicateSize := int64(0)
 		totalDuplicateFiles := 0
@@ -124,7 +144,7 @@ func (a *App) Scan() {
 		}
 
 		// Summary
-		fmt.Printf("\n# Summary: %d duplicate files in %d groups, %s wasted space\n",
+		fmt.Printf("\nSummary: %d duplicate files in %d groups, %s used space\n",
 			totalDuplicateFiles, len(results), HumanizeBytes(totalDuplicateSize))
 	}
 }
@@ -156,11 +176,13 @@ func (a *App) Export() {
 		fmt.Println() // Empty line between groups
 	}
 
-	fmt.Printf("# Summary: %d duplicate files in %d groups, %s wasted space\n",
+	// Important: here the total size is larger than in Scan() because we include all files \
+	// even the possible original file of a duplicate group.
+	fmt.Printf("# Summary: %d possible duplicate files in %d groups, %s used space\n",
 		totalFiles, len(files), HumanizeBytes(totalDuplicateSize))
 }
 
-func (a *App) Purge() {
+func (a *App) PurgeIndex() {
 	count, err := a.index.Purge()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -169,7 +191,7 @@ func (a *App) Purge() {
 	fmt.Printf("Purged %d files from the database\n", count)
 }
 
-func (a *App) Update() {
+func (a *App) UpdateIndex() {
 	count, err := a.index.Update()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -212,4 +234,59 @@ func (a *App) AddPath(path string, recursive bool, filter string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func (a *App) RemovePath(path string) {
+	if path == "" {
+		fmt.Fprintf(os.Stderr, "Error: No path specified\n")
+	}
+}
+
+func (a *App) MoveDuplicates(path string) {
+	if path == "" {
+		fmt.Fprintf(os.Stderr, "Error: No path specified\n")
+	}
+
+	dirInfo, err := os.Stat(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if !dirInfo.IsDir() {
+		fmt.Fprintf(os.Stderr, "Error: %s is not a directory\n", path)
+	}
+
+	// move files to directory
+	files := a.index.GetDuplicateFiles()
+	for _, file := range files {
+		err = os.Rename(file.Path, path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	fmt.Printf("Moved %d duplicate files to %s\n", len(files), path)
+
+	// Todo: Update database
+	// Update path of file
+	// Remove duplicate file?
+
+}
+
+func (a *App) MoveDuplicatesToTrash() {
+	// Get OS specific path of trash directory
+	trashpath := os.Getenv("HOME") + "/.Trash"
+	// Move duplicate files
+	a.MoveDuplicates(trashpath)
+}
+
+// Delete from duplicate table
+func (a *App) DatabaseForgetDuplicates() {
+	a.index.ForgetDuplicates()
+}
+
+// Null all hashes in the database file table
+func (a *App) DatabaseForgetHashes() {
+	a.index.ForgetHashes()
 }

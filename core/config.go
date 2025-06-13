@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"os"
@@ -7,9 +7,9 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	MinFileSize int64  // Minimum file size in bytes
-	DBFilename  string // Database filename
-	Verbose     bool
+	MinFileSize        int64  // Minimum file size in bytes
+	DBFilename         string // Database filename
+	BinaryCompareBytes int
 }
 
 // NewConfig creates a new configuration with default values and environment variable overrides

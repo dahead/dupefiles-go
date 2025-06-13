@@ -1,7 +1,11 @@
-# Standardwerte verwenden
+#@/bin/sh
+
+# show config
 ./df --showconfig
 
-# Mindestgröße und DB-Datei setzen
+# set some values
 export DF_MINSIZE=1024
-export DF_DBFILE=custom.db
-./df --quickscan /home/user/photos
+export DF_DBFILE=dupefiles.db
+
+# start scan
+./df --quickscan ~/Photos

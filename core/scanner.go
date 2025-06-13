@@ -1,8 +1,9 @@
-package main
+package core
 
 import (
 	"database/sql"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -33,22 +34,27 @@ func (s *Scanner) ScanBySize() (map[int64][]*FileItem, error) {
 	return sizeGroups, nil
 }
 
-// ScanByHash calculates hashes for files in each size group
+// Calculates hashes for files in each size group
 func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*FileItem, error) {
 	finalHashGroups := make(map[string][]*FileItem)
 
-	fmt.Println("Scanning for duplicate files...")
+	fmt.Println("Scanning for hash equivalent files...")
 	totalSizeGroups := len(sizeGroups)
 	processedSizeGroups := 0
 
-	for size, filesInGroup := range sizeGroups {
+	for _, filesInGroup := range sizeGroups {
 		processedSizeGroups++
 		if len(filesInGroup) < 2 {
 			continue
 		}
 
-		fmt.Printf("Processing size group %d/%d (size: %s bytes, files: %d)\n",
-			processedSizeGroups, totalSizeGroups, HumanizeBytes(size), len(filesInGroup))
+		fmt.Printf("Processing size group %d/%d\n",
+			processedSizeGroups, totalSizeGroups)
+
+		//fmt.Printf("Processing size group %d/%d (size: %s bytes, files: %d)\n",
+		//	processedSizeGroups, totalSizeGroups, HumanizeBytes(size), len(filesInGroup))
+
+		// fmt.Printf(".")
 
 		filesToHash := []*FileItem{}
 		for _, file := range filesInGroup {
@@ -80,7 +86,7 @@ func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*Fi
 				numWorkers = 1
 			}
 
-			fmt.Printf("  Calculating %d hashes with %d workers...\n", numJobs, numWorkers)
+			// fmt.Printf("  Calculating %d hashes with %d workers...\n", numJobs, numWorkers)
 
 			for w := 0; w < numWorkers; w++ {
 				wg.Add(1)
@@ -121,7 +127,7 @@ func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*Fi
 					fmt.Printf("  Warning: Failed to calculate hash for %s: %v\n", res.file.Path, res.err)
 					continue
 				}
-				res.file.Hash = sql.NullString{String: res.hashStr, Valid: true} // Update in-memory FileItem
+				res.file.Hash = sql.NullString{String: res.hashStr, Valid: true} // UpdateIndex in-memory FileItem
 				finalHashGroups[res.hashStr] = append(finalHashGroups[res.hashStr], res.file)
 				hashesToUpdateInDB = append(hashesToUpdateInDB, struct {
 					guid string
@@ -154,7 +160,7 @@ func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*Fi
 						if err != nil {
 							fmt.Printf("  Warning: Failed to commit transaction for hash updates: %v\n", err)
 						} else {
-							fmt.Printf("  Updated %d hashes in DB for current size group.\n", updatedCount)
+							// fmt.Printf("  Updated %d hashes in DB for current size group.\n", updatedCount)
 						}
 					}
 				}
@@ -165,7 +171,6 @@ func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*Fi
 	return finalHashGroups, nil
 }
 
-// ScanForDuplicates finds duplicate files and records them in the duplicates table
 func (s *Scanner) ScanForDuplicates() ([]ResultList, error) {
 	// Step 1: Group files by size
 	sizeGroups, err := s.ScanBySize()
@@ -181,80 +186,128 @@ func (s *Scanner) ScanForDuplicates() ([]ResultList, error) {
 
 	// Step 3: Find actual duplicates by comparing file contents
 	var results []ResultList
+	var resultsMu sync.Mutex
 
-	// Process finalHashGroups (files grouped by actual hash)
 	fmt.Println("Verifying potential duplicates...")
-	totalHashGroups := len(finalHashGroups)
-	processedHashGroups := 0
+
+	var wg sync.WaitGroup
+	resultsChan := make(chan ResultList, len(finalHashGroups))
+	semaphore := make(chan struct{}, runtime.NumCPU()) // Limit concurrent hash groups
 
 	for hash, filesInHashGroup := range finalHashGroups {
-		processedHashGroups++
 		if len(filesInHashGroup) < 2 {
 			continue
 		}
 
-		fmt.Printf("Processing hash group %d/%d (hash: %s..., files: %d)\n",
-			processedHashGroups, totalHashGroups, hash, len(filesInHashGroup))
+		wg.Add(1)
+		go func(h string, files []*FileItem) {
+			defer wg.Done()
+			semaphore <- struct{}{}        // Acquire
+			defer func() { <-semaphore }() // Release
 
-		var duplicateGuids []string
-
-		var actualDuplicatesThisGroup []*FileItem
-		if len(filesInHashGroup) > 1 {
-			// First file is a candidate
-			actualDuplicatesThisGroup = append(actualDuplicatesThisGroup, filesInHashGroup[0])
-
-			for i := 1; i < len(filesInHashGroup); i++ {
-				identical, err := CompareFilesBinary(filesInHashGroup[0].Path, filesInHashGroup[i].Path)
-				if err != nil {
-					fmt.Printf("  Warning: Failed to compare %s and %s: %v\n", filesInHashGroup[0].Path, filesInHashGroup[i].Path, err)
-					continue
-				}
-				if identical {
-					actualDuplicatesThisGroup = append(actualDuplicatesThisGroup, filesInHashGroup[i])
-				}
+			result := s.processHashGroupParallel(h, files)
+			if result != nil {
+				resultsChan <- *result
 			}
+		}(hash, filesInHashGroup)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	for result := range resultsChan {
+		resultsMu.Lock()
+		results = append(results, result)
+		resultsMu.Unlock()
+	}
+
+	return results, nil
+}
+
+func (s *Scanner) processHashGroupParallel(hash string, filesInHashGroup []*FileItem) *ResultList {
+	var actualDuplicatesThisGroup []*FileItem
+	actualDuplicatesThisGroup = append(actualDuplicatesThisGroup, filesInHashGroup[0])
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	results := make(chan struct {
+		file      *FileItem
+		identical bool
+		err       error
+	}, len(filesInHashGroup)-1)
+
+	for i := 1; i < len(filesInHashGroup); i++ {
+		wg.Add(1)
+		go func(fileToCompare *FileItem) {
+			defer wg.Done()
+			identical, err := CompareFilesBinaryRandom(filesInHashGroup[0].Path, fileToCompare.Path, s.idx.config.BinaryCompareBytes)
+			results <- struct {
+				file      *FileItem
+				identical bool
+				err       error
+			}{fileToCompare, identical, err}
+		}(filesInHashGroup[i])
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for result := range results {
+		if result.err != nil {
+			fmt.Printf("  Warning: Failed to compare %s and %s: %v\n", filesInHashGroup[0].Path, result.file.Path, result.err)
+			continue
 		}
-
-		if len(actualDuplicatesThisGroup) >= 2 {
-			// Record duplicates in the duplicates table
-			now := time.Now().Unix()
-			tx, err := s.idx.db.Begin()
-			if err != nil {
-				fmt.Printf("  Warning: Failed to begin transaction for duplicate updates: %v\n", err)
-			} else {
-				stmt, err := tx.Prepare(`
-					INSERT INTO duplicates (guid, scanned) 
-					VALUES (?, ?) 
-					ON CONFLICT(guid) DO UPDATE SET scanned = ?
-				`)
-				if err != nil {
-					fmt.Printf("  Warning: Failed to prepare statement for duplicate updates: %v\n", err)
-					tx.Rollback()
-				} else {
-					for _, f := range actualDuplicatesThisGroup {
-						_, err := stmt.Exec(f.Guid, now, now)
-						if err != nil {
-							fmt.Printf("  Warning: Failed to update duplicate for %s in DB: %v\n", f.Guid, err)
-						}
-					}
-					stmt.Close()
-					err = tx.Commit()
-					if err != nil {
-						fmt.Printf("  Warning: Failed to commit transaction for duplicate updates: %v\n", err)
-					}
-				}
-			}
-
-			for _, f := range actualDuplicatesThisGroup {
-				duplicateGuids = append(duplicateGuids, f.Guid)
-			}
-			results = append(results, ResultList{
-				HashSum:   hash,
-				FileGuids: duplicateGuids,
-			})
+		if result.identical {
+			mu.Lock()
+			actualDuplicatesThisGroup = append(actualDuplicatesThisGroup, result.file)
+			mu.Unlock()
 		}
 	}
-	return results, nil
+
+	if len(actualDuplicatesThisGroup) >= 2 {
+		// Record duplicates in the duplicates table
+		now := time.Now().Unix()
+		tx, err := s.idx.db.Begin()
+		if err != nil {
+			fmt.Printf("  Warning: Failed to begin transaction for duplicate updates: %v\n", err)
+		} else {
+			stmt, err := tx.Prepare(`
+               INSERT INTO duplicates (guid, scanned) 
+               VALUES (?, ?) 
+               ON CONFLICT(guid) DO UPDATE SET scanned = ?
+           `)
+			if err != nil {
+				fmt.Printf("  Warning: Failed to prepare statement for duplicate updates: %v\n", err)
+				tx.Rollback()
+			} else {
+				for _, f := range actualDuplicatesThisGroup {
+					_, err := stmt.Exec(f.Guid, now, now)
+					if err != nil {
+						fmt.Printf("  Warning: Failed to update duplicate for %s in DB: %v\n", f.Guid, err)
+					}
+				}
+				stmt.Close()
+				err = tx.Commit()
+				if err != nil {
+					fmt.Printf("  Warning: Failed to commit transaction for duplicate updates: %v\n", err)
+				}
+			}
+		}
+
+		var duplicateGuids []string
+		for _, f := range actualDuplicatesThisGroup {
+			duplicateGuids = append(duplicateGuids, f.Guid)
+		}
+		return &ResultList{
+			HashSum:   hash,
+			FileGuids: duplicateGuids,
+		}
+	}
+	return nil
 }
 
 func min(a, b int) int {

@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"database/sql"
@@ -137,6 +137,44 @@ func (idx *Index) GetDuplicateFiles() []*FileItem {
 	}
 
 	return duplicateFiles
+}
+
+// Todo:  Check if columns can be excluded at the top and below
+func (idx *Index) GetAllHashedFiles() []*FileItem {
+	query := `
+		SELECT f.path, f.extension, f.size, f.mod_time, f.hash, f.humanized_size 
+		FROM files f
+		WHERE f.hash IS NOT NULL
+		ORDER BY f.size DESC, f.hash
+	`
+
+	rows, err := idx.db.Query(query)
+	if err != nil {
+		fmt.Printf("Warning: Failed to query duplicate files: %v\n", err)
+		return []*FileItem{}
+	}
+	defer rows.Close()
+
+	// Todo:  Check if columns can be excluded at the top and below
+
+	var resultFiles []*FileItem
+	for rows.Next() {
+		var file FileItem
+		var hash sql.NullString
+		err := rows.Scan(&file.Guid, &file.Path, &file.Extension, &file.Size, &file.ModTime, &hash, &file.HumanizedSize)
+		if err != nil {
+			fmt.Printf("Warning: Failed to scan file row: %v\n", err)
+			continue
+		}
+		file.Hash = hash
+		resultFiles = append(resultFiles, &file)
+	}
+
+	if err = rows.Err(); err != nil {
+		fmt.Printf("Warning: Error iterating files: %v\n", err)
+	}
+
+	return resultFiles
 }
 
 func (idx *Index) GetFileByGuid(guid string) *FileItem {
@@ -447,4 +485,20 @@ func (idx *Index) Update() (int, error) {
 		}
 	}
 	return count, nil
+}
+
+// Delete all known duplicates
+func (idx *Index) ForgetDuplicates() error {
+	idx.db.Exec(
+		"DELETE from files WHERE guid IN (SELECT guid FROM duplicates)",
+	)
+	return nil
+}
+
+// Delete all calculated hash  values
+func (idx *Index) ForgetHashes() error {
+	idx.db.Exec(
+		"DELETE from files WHERE hash IS NOT NULL",
+	)
+	return nil
 }

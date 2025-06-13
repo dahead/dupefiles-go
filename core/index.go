@@ -139,10 +139,10 @@ func (idx *Index) GetDuplicateFiles() []*FileItem {
 	return duplicateFiles
 }
 
-// Todo:  Check if columns can be excluded at the top and below
+// Get all files that have hash values
 func (idx *Index) GetAllHashedFiles() []*FileItem {
 	query := `
-		SELECT f.path, f.extension, f.size, f.mod_time, f.hash, f.humanized_size 
+		SELECT f.guid, f.path, f.extension, f.size, f.mod_time, f.hash, f.humanized_size 
 		FROM files f
 		WHERE f.hash IS NOT NULL
 		ORDER BY f.size DESC, f.hash
@@ -150,12 +150,10 @@ func (idx *Index) GetAllHashedFiles() []*FileItem {
 
 	rows, err := idx.db.Query(query)
 	if err != nil {
-		fmt.Printf("Warning: Failed to query duplicate files: %v\n", err)
+		fmt.Printf("Warning: Failed to query hashed files: %v\n", err)
 		return []*FileItem{}
 	}
 	defer rows.Close()
-
-	// Todo:  Check if columns can be excluded at the top and below
 
 	var resultFiles []*FileItem
 	for rows.Next() {
@@ -489,16 +487,36 @@ func (idx *Index) Update() (int, error) {
 
 // Delete all known duplicates
 func (idx *Index) ForgetDuplicates() error {
-	idx.db.Exec(
+	result, err := idx.db.Exec(
 		"DELETE from files WHERE guid IN (SELECT guid FROM duplicates)",
 	)
+	if err != nil {
+		return fmt.Errorf("failed to forget duplicates: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+
+	fmt.Printf("Removed %d duplicate files from database\n", rowsAffected)
 	return nil
 }
 
-// Delete all calculated hash  values
+// Delete all calculated hash values
 func (idx *Index) ForgetHashes() error {
-	idx.db.Exec(
-		"DELETE from files WHERE hash IS NOT NULL",
+	result, err := idx.db.Exec(
+		"UPDATE files SET hash = NULL WHERE hash IS NOT NULL",
 	)
+	if err != nil {
+		return fmt.Errorf("failed to forget hashes: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+
+	fmt.Printf("Cleared hashes for %d files in database\n", rowsAffected)
 	return nil
 }

@@ -130,9 +130,11 @@ func CompareFilesBinaryRandom(path1, path2 string, sampleSize int) (bool, error)
 	defer file2.Close()
 
 	// Generate random positions
-	rand.Seed(time.Now().UnixNano())
+	// Note: In Go 1.20+ rand.Seed is deprecated as the random number generator is automatically seeded
+	// This code uses a local random source for better practice
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	maxOffset := fileSize - int64(sampleSize)
-	offset := rand.Int63n(maxOffset + 1)
+	offset := rng.Int63n(maxOffset + 1)
 
 	// Read samples
 	sample1 := make([]byte, sampleSize)

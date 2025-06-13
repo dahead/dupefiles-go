@@ -31,7 +31,7 @@ go build -o df
 
 ### Add directory and immediately scan it
 ```bash
-./df --sad /path/to/directory
+./df --qs /path/to/directory
 ```
 
 ### Scan for Duplicates
@@ -77,6 +77,11 @@ go build -o df
 ./df --dupes
 ```
 
+#### Show file hashes in the database
+```bash
+./df --hashes
+```
+
 #### Update files in the index
 ```bash
 ./df --update
@@ -85,4 +90,38 @@ go build -o df
 #### Remove non-existent files from index
 ```bash
 ./df --purge
+```
+
+#### Export duplicate files to a text file
+```bash
+./df --export > duplicates.txt
+```
+
+### Duplicate File Management
+
+#### Move duplicate files to a new directory
+```bash
+./df --move /path/to/destination
+```
+
+#### Move duplicate files to trash
+```bash
+./df --trash
+```
+
+#### Remove duplicate files from database
+```bash
+./df --forget
+```
+
+#### Remove hashes from database
+```bash
+./df --headshot
+```
+
+### Debug Mode
+
+#### Enable debug mode
+```bash
+./df --debug
 ```

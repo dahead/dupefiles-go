@@ -13,7 +13,7 @@ func main() {
 	// flags
 	var (
 		debug      = flag.Bool("debug", false, "Enable debug mode")
-		addPath    = flag.String("add", "path", "Add path to database (example: --add /home/user/documents)")
+		addPath    = flag.String("add", "", "Add path to database (example: --add /home/user/documents)")
 		showConfig = flag.Bool("config", false, "Show configuration")
 		showFiles  = flag.Bool("files", false, "Show all files in database")
 		showDupes  = flag.Bool("dupes", false, "Show all duplicate files in database")
@@ -22,8 +22,8 @@ func main() {
 		export     = flag.Bool("export", false, "Export duplicate files to STDOUT (example: --export > duplicates.txt)")
 		purge      = flag.Bool("purge", false, "Remove non-existing files from database")
 		update     = flag.Bool("update", false, "Updates file hashes in the database")
-		quickScan  = flag.String("qs", "path", "Add path to database and scan for duplicates (example: --quickscan /home/user/photos)")
-		move       = flag.String("move", "path", "Move duplicate files to a new directory")
+		quickScan  = flag.String("qs", "", "Add path to database and scan for duplicates (example: --quickscan /home/user/photos)")
+		move       = flag.String("move", "", "Move duplicate files to a new directory")
 		trash      = flag.Bool("trash", false, "Move duplicate files to trash")
 		forget     = flag.Bool("forget", false, "Remove duplicate files from database")
 		headshot   = flag.Bool("headshot", false, "Remove hashes from database")
@@ -57,7 +57,6 @@ func main() {
 	case *forget:
 		app.DatabaseForgetDuplicates()
 	case *headshot:
-		app.DatabaseForgetDuplicates()
 		app.DatabaseForgetHashes()
 	case *quickScan != "":
 		filter := ""

@@ -15,8 +15,9 @@ type Config struct {
 // NewConfig creates a new configuration with default values and environment variable overrides
 func NewConfig() *Config {
 	config := &Config{
-		MinFileSize: 1024 * 1000,    // default minimum file size
-		DBFilename:  "dupefiles.db", // default database filename
+		MinFileSize:        1024 * 1000,    // default minimum file size
+		DBFilename:         "dupefiles.db", // default database filename
+		BinaryCompareBytes: 1024,
 	}
 
 	// Read minimum file size from environment variable

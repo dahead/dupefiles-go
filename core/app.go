@@ -46,10 +46,24 @@ func HumanizeBytes(bytes int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
+func GetTrashPath() string {
+	path := os.Getenv("HOME") + "/.Trash"
+
+	// Check if the directory exists
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Warning: Trash directory %s does not exist\n", path)
+	}
+
+	return path
+}
+
 func (a *App) ShowConfig() {
 	fmt.Printf("Database file: %s\n", a.index.GetIndexPath())
 	fmt.Printf("Minimum file size: %d bytes\n", a.config.GetMinFileSize())
+	fmt.Printf("Binary compare byte size: %d bytes\n", a.config.BinaryCompareBytes)
 	fmt.Printf("Database filename: %s\n", a.config.GetDBFilename())
+	fmt.Printf("System trash directory: %s\n", GetTrashPath())
 }
 
 func (a *App) ShowFiles() {
@@ -98,7 +112,7 @@ func (a *App) Scan() {
 	// No files in FileIndex skip
 	files := a.index.GetAllFiles()
 	if len(files) == 0 {
-		fmt.Println("No files in database")
+		fmt.Println("No files in database. Nothing to scan.")
 		return
 	}
 
@@ -276,7 +290,7 @@ func (a *App) MoveDuplicates(path string) {
 
 func (a *App) MoveDuplicatesToTrash() {
 	// Get OS specific path of trash directory
-	trashpath := os.Getenv("HOME") + "/.Trash"
+	trashpath := GetTrashPath()
 	// Move duplicate files
 	a.MoveDuplicates(trashpath)
 }

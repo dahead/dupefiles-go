@@ -12,7 +12,6 @@ func main() {
 
 	// flags
 	var (
-		debug      = flag.Bool("debug", false, "Enable debug mode")
 		addPath    = flag.String("add", "", "Add path to database (example: --add /home/user/documents)")
 		showConfig = flag.Bool("config", false, "Show configuration")
 		showFiles  = flag.Bool("files", false, "Show all files in database")
@@ -20,6 +19,7 @@ func main() {
 		showHashes = flag.Bool("hashes", false, "Show file hashes in the database")
 		scan       = flag.Bool("scan", false, "Scan for duplicates")
 		export     = flag.Bool("export", false, "Export duplicate files to STDOUT (example: --export > duplicates.txt)")
+		clear      = flag.Bool("clear", false, "Clear all files in database")
 		purge      = flag.Bool("purge", false, "Remove non-existing files from database")
 		update     = flag.Bool("update", false, "Updates file hashes in the database")
 		quickScan  = flag.String("qs", "", "Add path to database and scan for duplicates (example: --quickscan /home/user/photos)")
@@ -34,8 +34,6 @@ func main() {
 	app := core.NewApp()
 
 	switch {
-	case *debug:
-		app.Debug = true
 	case *showConfig:
 		app.ShowConfig()
 	case *showFiles:
@@ -44,6 +42,8 @@ func main() {
 		app.ShowDupes()
 	case *showHashes:
 		app.ShowHashes()
+	case *clear:
+		app.ClearDatabase()
 	case *scan:
 		app.Scan()
 	case *export:

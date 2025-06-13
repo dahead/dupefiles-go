@@ -10,13 +10,11 @@ import (
 )
 
 type App struct {
-	Debug  bool
 	index  *Index
 	config *Config
 }
 
 func NewApp() *App {
-	debug := false
 	config := NewConfig()
 	idx, err := NewIndex(config)
 	if err != nil {
@@ -25,7 +23,6 @@ func NewApp() *App {
 	}
 
 	return &App{
-		Debug:  debug,
 		index:  idx,
 		config: config,
 	}
@@ -92,6 +89,9 @@ func GetTrashPath() string {
 }
 
 func (a *App) ShowConfig() {
+	fmt.Printf("Config:\n")
+	fmt.Printf("Debug: %v\n", a.config.Debug)
+	fmt.Printf("DryRun: %v\n", a.config.DryRun)
 	fmt.Printf("Database file: %s\n", a.index.GetIndexPath())
 	fmt.Printf("Minimum file size: %d bytes\n", a.config.GetMinFileSize())
 	fmt.Printf("Binary compare byte size: %d bytes\n", a.config.BinaryCompareBytes)
@@ -114,7 +114,7 @@ func (a *App) ShowFiles() {
 }
 
 func (a *App) ShowDupes() {
-	files := a.index.GetDuplicateFiles()
+	files := a.index.GetAllDupes()
 	if len(files) == 0 {
 		fmt.Println("No duplicate files in database")
 		return
@@ -197,7 +197,7 @@ func (a *App) Scan() {
 }
 
 func (a *App) Export() {
-	files := a.index.GetDuplicateFiles()
+	files := a.index.GetAllDupes()
 
 	// No files in FileIndex skip
 	if len(files) == 0 {
@@ -364,8 +364,8 @@ func (a *App) MoveDuplicates(path string) {
 		os.Exit(1)
 	}
 
-	// move files to directory
-	files := a.index.GetDuplicateFiles()
+	// move files to directory - only duplicates, keeping the first file of each size+hash group
+	files := a.index.GetRestOfDuplicates()
 	movedCount := 0
 
 	for _, file := range files {
@@ -382,31 +382,42 @@ func (a *App) MoveDuplicates(path string) {
 			destPath = filepath.Join(path, fmt.Sprintf("%s_%d%s", name, time.Now().UnixNano(), ext))
 		}
 
-		err = os.Rename(file.Path, destPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error moving %s: %v\n", file.Path, err)
-			continue
+		if a.config.DryRun {
+			fmt.Printf("Would move %s to %s\n", file.Path, destPath)
 		}
 
-		// Update the file path in the database
-		oldGuid := file.Guid
-		file.Path = destPath
-		file.Guid = filepath.Clean(destPath)
+		if !a.config.DryRun {
 
-		// Update the database
-		_, err = a.index.db.Exec(
-			"UPDATE files SET path = ?, guid = ? WHERE guid = ?",
-			file.Path, file.Guid, oldGuid,
-		)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error updating database for %s: %v\n", file.Path, err)
+			// Todo: invalid cross-device link
+
+			err = os.Rename(file.Path, destPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error moving %s: %v\n", file.Path, err)
+				continue
+			}
+
+			// Update the file path in the database
+			oldGuid := file.Guid
+			file.Path = destPath
+			file.Guid = filepath.Clean(destPath)
+
+			// Update the database
+			_, err = a.index.db.Exec(
+				"UPDATE files SET path = ?, guid = ? WHERE guid = ?",
+				file.Path, file.Guid, oldGuid,
+			)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error updating database for %s: %v\n", file.Path, err)
+			}
+
+			// Update the in-memory index
+			delete(a.index.files, oldGuid)
+			a.index.files[file.Guid] = file
+
+			movedCount++
+
 		}
 
-		// Update the in-memory index
-		delete(a.index.files, oldGuid)
-		a.index.files[file.Guid] = file
-
-		movedCount++
 	}
 
 	fmt.Printf("Moved %d duplicate files to %s\n", movedCount, path)
@@ -427,4 +438,54 @@ func (a *App) DatabaseForgetDuplicates() {
 // Null all hashes in the database file table
 func (a *App) DatabaseForgetHashes() {
 	a.index.ForgetHashes()
+}
+
+func (a *App) ClearDatabase() {
+	// Todo: delete all from every table
+
+	// Begin transaction
+	tx, err := a.index.db.Begin()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Failed to begin transaction: %v\n", err)
+		os.Exit(1)
+	}
+	defer tx.Rollback() // Rollback if not committed
+
+	// Prepare statement for deleting files
+	// Todo: also delete duplicates table?
+	stmt, err := tx.Prepare("DELETE FROM files")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Failed to prepare statement: %v\n", err)
+		os.Exit(1)
+	}
+	defer stmt.Close()
+
+	// Execute statement
+	result, err := stmt.Exec()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Failed to execute statement: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get number of affected rows
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Failed to get rows affected: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: Failed to commit transaction: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Remove from in-memory index
+	removedFromMemory := 0
+	for guid := range a.index.files {
+		delete(a.index.files, guid)
+		removedFromMemory++
+	}
+
+	fmt.Printf("Removed %d files from database\n", rowsAffected)
 }

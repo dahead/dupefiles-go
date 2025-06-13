@@ -1,23 +1,38 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 )
 
 // Config holds application configuration
 type Config struct {
+	Debug              bool
+	DryRun             bool
 	MinFileSize        int64  // Minimum file size in bytes
 	DBFilename         string // Database filename
-	BinaryCompareBytes int
+	BinaryCompareBytes int64
 }
 
 // NewConfig creates a new configuration with default values and environment variable overrides
 func NewConfig() *Config {
 	config := &Config{
+		Debug:              false,
+		DryRun:             false,
 		MinFileSize:        1024 * 1000,    // default minimum file size
 		DBFilename:         "dupefiles.db", // default database filename
 		BinaryCompareBytes: 1024,
+	}
+
+	// Read Debug
+	if os.Getenv("DF_DEBUG") == "true" {
+		config.Debug = true
+	}
+
+	// Read DryRun
+	if os.Getenv("DF_DRYRUN") == "true" {
+		config.DryRun = true
 	}
 
 	// Read minimum file size from environment variable
@@ -31,6 +46,21 @@ func NewConfig() *Config {
 	if envDBFile := os.Getenv("DF_DBFILE"); envDBFile != "" {
 		config.DBFilename = envDBFile
 	}
+
+	// Read BinaryCompareBytes
+	if envBCS := os.Getenv("DF_BINARY_COMPARE_SIZE"); envBCS != "" {
+		if parsed, err := strconv.ParseInt(envBCS, 10, 64); err == nil {
+			config.BinaryCompareBytes = parsed
+			fmt.Print("Environment variable read.")
+		}
+	}
+
+	if config.Debug {
+		fmt.Println("Configuration loaded from environment variables.")
+	}
+
+	// fmt.Println("Configuration loaded from environment variables.")
+	// fmt.Printf("ENV: ", os.Getenv("DF_DEBUG"))
 
 	return config
 }

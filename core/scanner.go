@@ -39,7 +39,7 @@ func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*Fi
 	finalHashGroups := make(map[string][]*FileItem)
 
 	fmt.Println("Scanning for hash equivalent files...")
-	totalSizeGroups := len(sizeGroups)
+	// totalSizeGroups := len(sizeGroups)
 	processedSizeGroups := 0
 
 	for _, filesInGroup := range sizeGroups {
@@ -48,8 +48,8 @@ func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*Fi
 			continue
 		}
 
-		fmt.Printf("Processing size group %d/%d\n",
-			processedSizeGroups, totalSizeGroups)
+		//fmt.Printf("Processing size group %d/%d\n",
+		//	processedSizeGroups, totalSizeGroups)
 
 		//fmt.Printf("Processing size group %d/%d (size: %s bytes, files: %d)\n",
 		//	processedSizeGroups, totalSizeGroups, HumanizeBytes(size), len(filesInGroup))

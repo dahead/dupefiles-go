@@ -104,11 +104,53 @@ func (idx *Index) GetAllFiles() []*FileItem {
 	return files
 }
 
-func (idx *Index) GetDuplicateFiles() []*FileItem {
+func (idx *Index) GetAllDupes() []*FileItem {
 	query := `
 		SELECT f.guid, f.path, f.extension, f.size, f.mod_time, f.hash, f.humanized_size 
 		FROM files f
 		INNER JOIN duplicates d ON f.guid = d.guid
+		ORDER BY f.size DESC, f.hash
+	`
+
+	rows, err := idx.db.Query(query)
+	if err != nil {
+		fmt.Printf("Warning: Failed to query duplicate files: %v\n", err)
+		return []*FileItem{}
+	}
+	defer rows.Close()
+
+	var duplicateFiles []*FileItem
+	for rows.Next() {
+		var file FileItem
+		var hash sql.NullString
+		err := rows.Scan(&file.Guid, &file.Path, &file.Extension, &file.Size, &file.ModTime, &hash, &file.HumanizedSize)
+		if err != nil {
+			fmt.Printf("Warning: Failed to scan duplicate file row: %v\n", err)
+			continue
+		}
+		file.Hash = hash
+		duplicateFiles = append(duplicateFiles, &file)
+	}
+
+	if err = rows.Err(); err != nil {
+		fmt.Printf("Warning: Error iterating duplicate files: %v\n", err)
+	}
+
+	return duplicateFiles
+}
+
+func (idx *Index) GetRestOfDuplicates() []*FileItem {
+	// get all duplicates except the first one of each size+hash group
+	query := `
+		SELECT f.guid, f.path, f.extension, f.size, f.mod_time, f.hash, f.humanized_size 
+		FROM files f
+		INNER JOIN duplicates d ON f.guid = d.guid
+		WHERE f.guid NOT IN (
+			SELECT MIN(f2.guid)
+			FROM files f2
+			INNER JOIN duplicates d2 ON f2.guid = d2.guid
+			GROUP BY f2.size, f2.hash
+		)
 		ORDER BY f.size DESC, f.hash
 	`
 

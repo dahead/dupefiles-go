@@ -94,7 +94,7 @@ func CompareFilesBinary(path1, path2 string) (bool, error) {
 	}
 }
 
-func CompareFilesBinaryRandom(path1, path2 string, sampleSize int) (bool, error) {
+func CompareFilesBinaryRandom(path1, path2 string, sampleSize int64) (bool, error) {
 	// Get file info first
 	info1, err := os.Stat(path1)
 	if err != nil {

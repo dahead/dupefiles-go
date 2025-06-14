@@ -19,7 +19,9 @@ func main() {
 		showHashes = flag.Bool("hashes", false, "Show file hashes in the database")
 		scan       = flag.Bool("scan", false, "Scan for duplicates")
 		export     = flag.Bool("export", false, "Export duplicate files to STDOUT (example: --export > duplicates.txt)")
-		clear      = flag.Bool("clear", false, "Clear all files in database")
+		exportjson = flag.String("export-json", "", "Export duplicate files to a filename")
+		exportcsv  = flag.String("export-csv", "", "Export duplicate files to a filename")
+		cleardb    = flag.Bool("clear", false, "Clear all files in database")
 		purge      = flag.Bool("purge", false, "Remove non-existing files from database")
 		update     = flag.Bool("update", false, "Updates file hashes in the database")
 		quickScan  = flag.String("qs", "", "Add path to database and scan for duplicates (example: --quickscan /home/user/photos)")
@@ -42,12 +44,16 @@ func main() {
 		app.ShowDupes()
 	case *showHashes:
 		app.ShowHashes()
-	case *clear:
+	case *cleardb:
 		app.ClearDatabase()
 	case *scan:
 		app.Scan()
 	case *export:
 		app.Export()
+	case *exportjson != "":
+		app.ExportToJsonFile(*exportjson)
+	case *exportcsv != "":
+		app.ExportToCSVFile(*exportcsv)
 	case *purge:
 		app.PurgeIndex()
 	case *update:

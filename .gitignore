@@ -1,3 +1,8 @@
 /builds/linux/dupefiles.db
 /builds/linux/dupefiles.db-shm
 /builds/linux/dupefiles.db-wal
+/builds/linux/dupefiles.db
+/builds/linux/dupefiles.db-shm
+/builds/linux/dupefiles.db-wal
+/builds/linux/output.csv
+/builds/linux/output.json

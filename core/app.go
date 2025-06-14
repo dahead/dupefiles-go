@@ -423,7 +423,7 @@ func (a *App) AddPath(path string, recursive bool, filter string) {
 	}
 }
 
-func (a *App) RemovePath(path string) {
+func (a *App) RemovePathFromIndex(path string) {
 	if path == "" {
 		fmt.Fprintf(os.Stderr, "Error: No path specified\n")
 		os.Exit(1)
@@ -487,7 +487,7 @@ func (a *App) RemovePath(path string) {
 	fmt.Printf("Removed %d files from database\n", rowsAffected)
 }
 
-func (a *App) MoveDuplicates(path string) {
+func (a *App) MoveDuplicateFilesToDirectory(path string) {
 	if path == "" {
 		fmt.Fprintf(os.Stderr, "Error: No path specified\n")
 		os.Exit(1)
@@ -563,11 +563,11 @@ func (a *App) MoveDuplicates(path string) {
 	fmt.Printf("Moved %d duplicate files to %s\n", movedCount, path)
 }
 
-func (a *App) MoveDuplicatesToTrash() {
+func (a *App) MoveDuplicateFilesToTrash() {
 	// Get OS specific path of trash directory
 	trashpath := GetTrashPath()
 	// Move duplicate files
-	a.MoveDuplicates(trashpath)
+	a.MoveDuplicateFilesToDirectory(trashpath)
 }
 
 // Delete from duplicate table

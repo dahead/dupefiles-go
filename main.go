@@ -59,7 +59,7 @@ func main() {
 	case *update:
 		app.UpdateIndex()
 	case *trash:
-		app.MoveDuplicatesToTrash()
+		app.MoveDuplicateFilesToTrash()
 	case *forget:
 		app.DatabaseForgetDuplicates()
 	case *headshot:
@@ -80,7 +80,7 @@ func main() {
 		}
 		app.AddPath(*addPath, true, filter)
 	case *move != "":
-		app.MoveDuplicates(*move)
+		app.MoveDuplicateFilesToDirectory(*move)
 	default:
 		// Default scan behavior
 		app.Scan()

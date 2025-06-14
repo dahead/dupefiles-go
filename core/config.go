@@ -8,11 +8,11 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	Debug              bool
-	DryRun             bool
+	Debug              bool   // Show debug information. Todo!
+	DryRun             bool   // Relevant for moving, trashing files. Set to true, only a simulation will follow. No files will get touched.
 	MinFileSize        int64  // Minimum file size in bytes
 	DBFilename         string // Database filename
-	BinaryCompareBytes int64
+	BinaryCompareBytes int64  // Sample size for binary comparison. If 0 always the whole file gets compared. If > 0 only this amount of bytes get compared. The bytes are picked randomly across the whole file.
 }
 
 // NewConfig creates a new configuration with default values and environment variable overrides
@@ -22,7 +22,7 @@ func NewConfig() *Config {
 		DryRun:             false,
 		MinFileSize:        1024 * 1000,    // default minimum file size
 		DBFilename:         "dupefiles.db", // default database filename
-		BinaryCompareBytes: 1024,
+		BinaryCompareBytes: 0,
 	}
 
 	// Read Debug

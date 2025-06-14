@@ -8,23 +8,23 @@ import (
 
 func main() {
 	// show app information text in the CLI and copyright info
-	fmt.Println("DupeFiles v0.1.3 - Copyright (c) 2025 dh")
+	fmt.Println("DupeFiles v0.1.4 - Copyright (c) 2025 dh")
 
 	// flags
 	var (
-		addPath    = flag.String("add", "", "Add path to database (example: --add /home/user/documents)")
+		addPath    = flag.String("add", "", "Add path to database")
 		showConfig = flag.Bool("config", false, "Show configuration")
 		showFiles  = flag.Bool("files", false, "Show all files in database")
 		showDupes  = flag.Bool("dupes", false, "Show all duplicate files in database")
 		showHashes = flag.Bool("hashes", false, "Show file hashes in the database")
 		scan       = flag.Bool("scan", false, "Scan for duplicates")
-		export     = flag.Bool("export", false, "Export duplicate files to STDOUT (example: --export > duplicates.txt)")
+		export     = flag.Bool("export", false, "Export duplicate files to STDOUT")
 		exportjson = flag.String("export-json", "", "Export duplicate files to a filename")
 		exportcsv  = flag.String("export-csv", "", "Export duplicate files to a filename")
 		cleardb    = flag.Bool("clear", false, "Clear all files in database")
 		purge      = flag.Bool("purge", false, "Remove non-existing files from database")
 		update     = flag.Bool("update", false, "Updates file hashes in the database")
-		quickScan  = flag.String("qs", "", "Add path to database and scan for duplicates (example: --quickscan /home/user/photos)")
+		quickScan  = flag.String("qs", "", "Add path to database and scan for duplicates (example: ./df --qs /home/user/photos)")
 		move       = flag.String("move", "", "Move duplicate files to a new directory")
 		trash      = flag.Bool("trash", false, "Move duplicate files to trash")
 		forget     = flag.Bool("forget", false, "Remove duplicate files from database")

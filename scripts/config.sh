@@ -6,6 +6,9 @@
 # set some values
 export DF_MINSIZE=1024
 export DF_DBFILE=dupefiles.db
+export DF_BINARY_COMPARE_SIZE=0
+export DF_DEBUG=false
+export DF_DRYRUN=false
 
-# start scan
-./df --quickscan ~/Photos
+# show config
+./df --showconfig

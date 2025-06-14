@@ -571,16 +571,16 @@ func (a *App) MoveDuplicateFilesToTrash() {
 }
 
 // Delete from duplicate table
-func (a *App) DatabaseForgetDuplicates() {
+func (a *App) IndexForgetDuplicateFiles() {
 	a.index.ForgetDuplicates()
 }
 
 // Null all hashes in the database file table
-func (a *App) DatabaseForgetHashes() {
+func (a *App) IndexForgetHashes() {
 	a.index.ForgetHashes()
 }
 
-func (a *App) ClearDatabase() {
+func (a *App) ClearIndex() {
 	// Todo: delete all from every table
 
 	// Begin transaction

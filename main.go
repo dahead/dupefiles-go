@@ -12,23 +12,24 @@ func main() {
 
 	// flags
 	var (
-		addPath    = flag.String("add", "", "Add path to database")
-		showConfig = flag.Bool("config", false, "Show configuration")
-		showFiles  = flag.Bool("files", false, "Show all files in database")
-		showDupes  = flag.Bool("dupes", false, "Show all duplicate files in database")
-		showHashes = flag.Bool("hashes", false, "Show file hashes in the database")
-		scan       = flag.Bool("scan", false, "Scan for duplicates")
-		export     = flag.Bool("export", false, "Export duplicate files to STDOUT")
-		exportjson = flag.String("export-json", "", "Export duplicate files to a filename")
-		exportcsv  = flag.String("export-csv", "", "Export duplicate files to a filename")
-		cleardb    = flag.Bool("clear", false, "Clear all files in database")
-		purge      = flag.Bool("purge", false, "Remove non-existing files from database")
-		update     = flag.Bool("update", false, "Updates file hashes in the database")
-		quickScan  = flag.String("qs", "", "Add path to database and scan for duplicates (example: ./df --qs /home/user/photos)")
-		move       = flag.String("move", "", "Move duplicate files to a new directory")
-		trash      = flag.Bool("trash", false, "Move duplicate files to trash")
-		forget     = flag.Bool("forget", false, "Remove duplicate files from database")
-		headshot   = flag.Bool("headshot", false, "Remove hashes from database")
+		addPath     = flag.String("add", "", "Add path to database")
+		removePath  = flag.String("remove", "", "Remove path from database")
+		showConfig  = flag.Bool("config", false, "Show configuration")
+		showFiles   = flag.Bool("files", false, "Show all files in database")
+		showDupes   = flag.Bool("dupes", false, "Show all duplicate files in database")
+		showHashes  = flag.Bool("hashes", false, "Show file hashes in the database")
+		scan        = flag.Bool("scan", false, "Scan for duplicates")
+		export      = flag.Bool("export", false, "Export duplicate files to STDOUT")
+		exportjson  = flag.String("export-json", "", "Export duplicate files to a filename")
+		exportcsv   = flag.String("export-csv", "", "Export duplicate files to a filename")
+		clearindex  = flag.Bool("clear", false, "Clear all files in database")
+		purgeIndex  = flag.Bool("purgeIndex", false, "Remove non-existing files from database")
+		updateIndex = flag.Bool("updateIndex", false, "Updates file hashes in the database")
+		quickScan   = flag.String("qs", "", "Add path to database and scan for duplicates (example: ./df --qs /home/user/photos)")
+		move        = flag.String("move", "", "Move duplicate files to a new directory")
+		trash       = flag.Bool("trash", false, "Move duplicate files to trash")
+		forget      = flag.Bool("forget", false, "Remove duplicate files from database")
+		headshot    = flag.Bool("headshot", false, "Remove hashes from database")
 	)
 	flag.Parse()
 
@@ -44,28 +45,11 @@ func main() {
 		app.ShowDupes()
 	case *showHashes:
 		app.ShowHashes()
-	case *cleardb:
-		app.ClearDatabase()
 	case *scan:
 		app.Scan()
-	case *export:
-		app.Export()
-	case *exportjson != "":
-		app.ExportToJsonFile(*exportjson)
-	case *exportcsv != "":
-		app.ExportToCSVFile(*exportcsv)
-	case *purge:
-		app.PurgeIndex()
-	case *update:
-		app.UpdateIndex()
-	case *trash:
-		app.MoveDuplicateFilesToTrash()
-	case *forget:
-		app.DatabaseForgetDuplicates()
-	case *headshot:
-		app.DatabaseForgetHashes()
 	case *quickScan != "":
 		filter := ""
+		// do we have a filter in the arguments?
 		if flag.NArg() > 0 {
 			filter = flag.Arg(0)
 		}
@@ -75,12 +59,33 @@ func main() {
 		app.Scan()
 	case *addPath != "":
 		filter := ""
+		// do we have a filter in the arguments?
 		if flag.NArg() > 0 {
 			filter = flag.Arg(0)
 		}
 		app.AddPath(*addPath, true, filter)
+	case *removePath != "":
+		app.RemovePathFromIndex(*removePath)
+	case *export:
+		app.Export()
+	case *exportjson != "":
+		app.ExportToJsonFile(*exportjson)
+	case *exportcsv != "":
+		app.ExportToCSVFile(*exportcsv)
+	case *purgeIndex:
+		app.PurgeIndex()
+	case *updateIndex:
+		app.UpdateIndex()
+	case *clearindex:
+		app.ClearIndex()
+	case *forget:
+		app.IndexForgetDuplicateFiles()
+	case *headshot:
+		app.IndexForgetHashes()
 	case *move != "":
 		app.MoveDuplicateFilesToDirectory(*move)
+	case *trash:
+		app.MoveDuplicateFilesToTrash()
 	default:
 		// Default scan behavior
 		app.Scan()

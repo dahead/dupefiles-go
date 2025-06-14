@@ -7,7 +7,6 @@ import (
 )
 
 func main() {
-	// show app information text in the CLI and copyright info
 	fmt.Println("DupeFiles v0.1.4 - Copyright (c) 2025 dh")
 
 	// flags
@@ -18,7 +17,7 @@ func main() {
 		showFiles   = flag.Bool("files", false, "Show all files in database")
 		showDupes   = flag.Bool("dupes", false, "Show all duplicate files in database")
 		showHashes  = flag.Bool("hashes", false, "Show file hashes in the database")
-		scan        = flag.Bool("scan", false, "Scan for duplicates")
+		scan        = flag.Bool("scan", false, "StartScan for duplicates")
 		export      = flag.Bool("export", false, "Export duplicate files to STDOUT")
 		exportjson  = flag.String("export-json", "", "Export duplicate files to a filename")
 		exportcsv   = flag.String("export-csv", "", "Export duplicate files to a filename")
@@ -46,7 +45,7 @@ func main() {
 	case *showHashes:
 		app.ShowHashes()
 	case *scan:
-		app.Scan()
+		app.StartScan()
 	case *quickScan != "":
 		filter := ""
 		// do we have a filter in the arguments?
@@ -54,16 +53,17 @@ func main() {
 			filter = flag.Arg(0)
 		}
 		// First add the path to database
-		app.AddPath(*quickScan, true, filter)
+		app.AddPathToIndex(*quickScan, true, filter)
 		// Then scan for duplicates
-		app.Scan()
+		app.StartScan()
 	case *addPath != "":
+		//  todo: add parsing for recursive flag
 		filter := ""
 		// do we have a filter in the arguments?
 		if flag.NArg() > 0 {
 			filter = flag.Arg(0)
 		}
-		app.AddPath(*addPath, true, filter)
+		app.AddPathToIndex(*addPath, true, filter)
 	case *removePath != "":
 		app.RemovePathFromIndex(*removePath)
 	case *export:
@@ -88,6 +88,6 @@ func main() {
 		app.MoveDuplicateFilesToTrash()
 	default:
 		// Default scan behavior
-		app.Scan()
+		app.StartScan()
 	}
 }

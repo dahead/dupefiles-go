@@ -20,7 +20,7 @@ func NewConfig() *Config {
 	config := &Config{
 		Debug:              false,
 		DryRun:             false,
-		MinFileSize:        1024 * 1000,    // default minimum file size
+		MinFileSize:        1024,           // default minimum file size
 		DBFilename:         "dupefiles.db", // default database filename
 		BinaryCompareBytes: 0,
 	}
@@ -59,18 +59,5 @@ func NewConfig() *Config {
 	//	fmt.Println("Configuration loaded from environment variables. Debug is on.")
 	//}
 
-	// fmt.Println("Configuration loaded from environment variables.")
-	// fmt.Printf("ENV: ", os.Getenv("DF_DEBUG"))
-
 	return config
-}
-
-// GetMinFileSize returns the minimum file size threshold
-func (c *Config) GetMinFileSize() int64 {
-	return c.MinFileSize
-}
-
-// GetDBFilename returns the database filename
-func (c *Config) GetDBFilename() string {
-	return c.DBFilename
 }

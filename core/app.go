@@ -1,12 +1,10 @@
 package core
 
 import (
-	"encoding/csv"
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -36,68 +34,14 @@ func (a *App) Close() {
 	}
 }
 
-func HumanizeBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
-
-func GetTrashPath() string {
-	var path string
-
-	// Determine OS-specific trash directory
-	switch runtime.GOOS {
-	case "darwin":
-		// macOS
-		path = os.Getenv("HOME") + "/.Trash"
-	case "linux":
-		// Linux (follows FreeDesktop.org trash specification)
-		// First try XDG_DATA_HOME
-		xdgDataHome := os.Getenv("XDG_DATA_HOME")
-		if xdgDataHome != "" {
-			path = filepath.Join(xdgDataHome, "Trash")
-		} else {
-			// Default to ~/.local/share/Trash
-			path = filepath.Join(os.Getenv("HOME"), ".local/share/Trash")
-		}
-	case "windows":
-		// Windows
-		path = filepath.Join(os.Getenv("USERPROFILE"), "RecycleBin")
-	default:
-		// Default fallback
-		path = filepath.Join(os.Getenv("HOME"), ".Trash")
-	}
-
-	// Check if the directory exists
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "Warning: Trash directory %s does not exist\n", path)
-		// Try to create the directory
-		if err := os.MkdirAll(path, 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: Failed to create trash directory: %v\n", err)
-		} else {
-			fmt.Printf("Created trash directory: %s\n", path)
-		}
-	}
-
-	return path
-}
-
 func (a *App) ShowConfig() {
 	fmt.Printf("Config:\n")
 	fmt.Printf("Debug: %v\n", a.config.Debug)
 	fmt.Printf("DryRun: %v\n", a.config.DryRun)
 	fmt.Printf("Database file: %s\n", a.index.GetIndexPath())
-	fmt.Printf("Minimum file size: %d bytes\n", a.config.GetMinFileSize())
+	fmt.Printf("Minimum file size: %d bytes\n", a.config.MinFileSize)
 	fmt.Printf("Binary compare byte size: %d bytes\n", a.config.BinaryCompareBytes)
-	fmt.Printf("Database filename: %s\n", a.config.GetDBFilename())
+	fmt.Printf("Database filename: %s\n", a.config.DBFilename)
 	fmt.Printf("System trash directory: %s\n", GetTrashPath())
 }
 
@@ -143,7 +87,7 @@ func (a *App) ShowHashes() {
 	fmt.Printf("Hashed files in database: %d total.\n", len(files))
 }
 
-func (a *App) Scan() {
+func (a *App) StartScan() {
 	// No files in FileIndex skip
 	files := a.index.GetAllFiles()
 	if len(files) == 0 {
@@ -165,7 +109,6 @@ func (a *App) Scan() {
 	if len(results) == 0 {
 		fmt.Println("No duplicate files found!\n")
 	} else {
-		fmt.Print()
 		fmt.Printf("Found %d group(s) of duplicate files:\n", len(results))
 
 		totalDuplicateSize := int64(0)
@@ -193,180 +136,9 @@ func (a *App) Scan() {
 		}
 
 		// Summary
-		fmt.Printf("\nSummary: %d duplicate files in %d groups, %s used space\n",
+		fmt.Printf("\nSummary: %d duplicate file(s) in %d group(s), %s used space\n",
 			totalDuplicateFiles, len(results), HumanizeBytes(totalDuplicateSize))
 	}
-}
-
-// Export the duplicates in a report
-func (a *App) Export() {
-	files := a.index.GetAllDupes()
-
-	// No files in FileIndex skip
-	if len(files) == 0 {
-		fmt.Fprintf(os.Stderr, "No duplicate files in database\n")
-		os.Exit(1)
-	}
-
-	fmt.Printf("# DupeFiles Export - Found %d groups of possible duplicate files\n", len(files))
-	fmt.Printf("# Format: [Group Number] [Hash] [File Count] [Total Size]\n")
-	fmt.Println("#")
-
-	totalDuplicateSize := int64(0)
-	totalFiles := 0
-
-	for i, file := range files {
-		totalFiles++
-		groupSize := file.Size // Größe des duplizierten Files
-		totalDuplicateSize += groupSize
-
-		// Todo: Check printf parameters here. Why "1"?
-		fmt.Printf("[Group %d] %v %d %s\n", i+1, file.Hash, 1, HumanizeBytes(groupSize))
-		fmt.Printf("- %s (%s)\n", file.Path, file.HumanizedSize)
-		fmt.Println() // Empty line between groups
-	}
-
-	fmt.Printf("# Summary: %d possible duplicate files in %d groups, %s total used space\n",
-		totalFiles, len(files), HumanizeBytes(totalDuplicateSize))
-}
-
-func (a *App) ExportToJsonFile(filename string) error {
-	files := a.index.GetAllDupes()
-
-	// No files in FileIndex skip
-	if len(files) == 0 {
-		return fmt.Errorf("no duplicate files in database")
-	}
-
-	// Create output filename if not provided
-	if filename == "" {
-		timestamp := time.Now().Format("20060102_150405")
-		filename = fmt.Sprintf("dupefiles_export_%s.json", timestamp)
-	}
-
-	// Ensure the directory exists
-	dir := filepath.Dir(filename)
-	if dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %v", err)
-		}
-	}
-
-	// Group files by hash
-	groups := make(map[string]*DuplicateGroup)
-	for _, file := range files {
-		hash := file.Hash.String
-		if _, exists := groups[hash]; !exists {
-			groups[hash] = &DuplicateGroup{
-				GroupID:   len(groups) + 1,
-				Hash:      hash,
-				Size:      file.Size,
-				HumanSize: HumanizeBytes(file.Size),
-				FileCount: 0,
-				Files:     []string{},
-			}
-		}
-		groups[hash].FileCount++
-		groups[hash].Files = append(groups[hash].Files, file.Path)
-	}
-
-	// Convert map to slice for JSON output
-	var duplicateGroups []*DuplicateGroup
-	for _, group := range groups {
-		duplicateGroups = append(duplicateGroups, group)
-	}
-
-	// Create JSON output
-	jsonData, err := json.MarshalIndent(duplicateGroups, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %v", err)
-	}
-
-	// Write to file
-	if err := os.WriteFile(filename, jsonData, 0644); err != nil {
-		return fmt.Errorf("failed to write JSON file: %v", err)
-	}
-
-	fmt.Printf("Exported %d duplicate groups to %s\n", len(duplicateGroups), filename)
-	return nil
-}
-
-func (a *App) ExportToCSVFile(filename string) error {
-	files := a.index.GetAllDupes()
-
-	// No files in FileIndex skip
-	if len(files) == 0 {
-		return fmt.Errorf("no duplicate files in database")
-	}
-
-	// Create output filename if not provided
-	if filename == "" {
-		timestamp := time.Now().Format("20060102_150405")
-		filename = fmt.Sprintf("dupefiles_export_%s.csv", timestamp)
-	}
-
-	// Ensure the directory exists
-	dir := filepath.Dir(filename)
-	if dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %v", err)
-		}
-	}
-
-	// Group files by hash
-	groups := make(map[string]*DuplicateGroup)
-	for _, file := range files {
-		hash := file.Hash.String
-		if _, exists := groups[hash]; !exists {
-			groups[hash] = &DuplicateGroup{
-				GroupID:   len(groups) + 1,
-				Hash:      hash,
-				Size:      file.Size,
-				HumanSize: HumanizeBytes(file.Size),
-				FileCount: 0,
-				Files:     []string{},
-			}
-		}
-		groups[hash].FileCount++
-		groups[hash].Files = append(groups[hash].Files, file.Path)
-	}
-
-	// Create CSV file
-	file, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("failed to create CSV file: %v", err)
-	}
-	defer file.Close()
-
-	// Create CSV writer
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	// Write header
-	header := []string{"Group ID", "Hash", "Size (bytes)", "Human Size", "File Count", "File Path"}
-	if err := writer.Write(header); err != nil {
-		return fmt.Errorf("failed to write CSV header: %v", err)
-	}
-
-	// Write data
-	for _, group := range groups {
-		for _, filePath := range group.Files {
-			record := []string{
-				fmt.Sprintf("%d", group.GroupID),
-				group.Hash,
-				fmt.Sprintf("%d", group.Size),
-				group.HumanSize,
-				fmt.Sprintf("%d", group.FileCount),
-				filePath,
-			}
-			if err := writer.Write(record); err != nil {
-				return fmt.Errorf("failed to write CSV record: %v", err)
-			}
-		}
-	}
-
-	fmt.Printf("Exported %d duplicate groups to %s\n", len(groups), filename)
-	return nil
 }
 
 func (a *App) PurgeIndex() {
@@ -387,15 +159,9 @@ func (a *App) UpdateIndex() {
 	fmt.Printf("Updated %d files in the database\n", count)
 }
 
-func (a *App) AddPath(path string, recursive bool, filter string) {
+func (a *App) AddPathToIndex(path string, recursive bool, filter string) {
 	if path == "" {
 		fmt.Fprintf(os.Stderr, "Error: No path specified\n")
-		os.Exit(1)
-	}
-
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -403,14 +169,12 @@ func (a *App) AddPath(path string, recursive bool, filter string) {
 	currentCount := len(a.index.GetAllFiles())
 
 	// add directory or file
-	if fileInfo.IsDir() {
-		err = a.index.AddDirectory(path, recursive, filter)
-	} else {
-		err = a.index.AddFile(path)
-		if err == nil {
-			fmt.Printf("Added: %s\n", path)
-		}
+	fileItems, err := a.getFileInfos(path, recursive, filter)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
+	err = a.index.AddFileItems(fileItems)
 
 	// remember new amount of indexed files
 	newCount := len(a.index.GetAllFiles())
@@ -421,6 +185,51 @@ func (a *App) AddPath(path string, recursive bool, filter string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func (a *App) getFileInfos(dirPath string, recursive bool, filter string) ([]*FileItem, error) {
+	var fileItems []*FileItem
+	minFileSize := a.index.config.MinFileSize
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+		if info.IsDir() {
+			if !recursive && path != dirPath {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Filter check
+		if filter != "" {
+			if matched, _ := filepath.Match(filter, filepath.Base(path)); !matched {
+				return nil
+			}
+		}
+
+		// Size check
+		if minFileSize > 0 && info.Size() < minFileSize {
+			return nil
+		}
+
+		fileItems = append(fileItems, &FileItem{
+			Guid:          filepath.Clean(path),
+			Path:          path,
+			Extension:     strings.TrimPrefix(filepath.Ext(path), "."),
+			Size:          info.Size(),
+			HumanizedSize: HumanizeBytes(info.Size()),
+			ModTime:       info.ModTime().Unix(),
+			Hash:          sql.NullString{String: "", Valid: false},
+		})
+
+		// fmt.Printf("  %s\n", path)
+
+		return nil
+	})
+
+	return fileItems, err
 }
 
 func (a *App) RemovePathFromIndex(path string) {

@@ -1,4 +1,3 @@
-// fileutils.go
 package core
 
 import (

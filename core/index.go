@@ -17,7 +17,7 @@ type Index struct {
 }
 
 func NewIndex(config *Config) (*Index, error) {
-	dbFileName := config.GetDBFilename()
+	dbFileName := config.DBFilename
 
 	_, err := os.Stat(dbFileName)
 	dbExists := !os.IsNotExist(err)
@@ -92,7 +92,7 @@ func NewIndex(config *Config) (*Index, error) {
 }
 
 func (idx *Index) GetIndexPath() string {
-	absPath, _ := filepath.Abs(idx.config.GetDBFilename())
+	absPath, _ := filepath.Abs(idx.config.DBFilename)
 	return absPath
 }
 
@@ -256,7 +256,7 @@ func (idx *Index) AddFile(path string) error {
 		return nil
 	}
 
-	minFileSize := idx.config.GetMinFileSize()
+	minFileSize := idx.config.MinFileSize
 	if minFileSize > 0 && fileInfo.Size() < minFileSize {
 		fmt.Printf("Skipping %s (size: %d)\n", path, fileInfo.Size()) // Can be verbose
 		return nil
@@ -297,7 +297,8 @@ func (idx *Index) AddFile(path string) error {
 	return err
 }
 
-// AddDirectory uses batch inserts with database transaction for better performance
+// Todo: move the file retrieval outside this function
+// Here we just add the files to the index
 func (idx *Index) AddDirectory(dirPath string, recursive bool, filter string) error {
 	fileInfo, err := os.Stat(dirPath)
 	if err != nil {
@@ -332,6 +333,8 @@ func (idx *Index) AddDirectory(dirPath string, recursive bool, filter string) er
 			}
 			return nil
 		}
+
+		// is a filter set? check for it
 		if filter != "" {
 			matched, errMatch := filepath.Match(filter, filepath.Base(path))
 			if errMatch != nil {
@@ -344,11 +347,12 @@ func (idx *Index) AddDirectory(dirPath string, recursive bool, filter string) er
 		}
 
 		// Check minimum file size
-		minFileSize := idx.config.GetMinFileSize()
+		minFileSize := idx.config.MinFileSize
 		if minFileSize > 0 && info.Size() < minFileSize {
 			return nil
 		}
 
+		// get file info
 		guid := filepath.Clean(path)
 		extension := strings.TrimPrefix(filepath.Ext(path), ".")
 		modTime := info.ModTime().Unix()
@@ -396,6 +400,30 @@ func (idx *Index) AddDirectory(dirPath string, recursive bool, filter string) er
 	}
 
 	return nil
+}
+
+func (idx *Index) AddFileItems(fileItems []*FileItem) error {
+	tx, err := idx.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("INSERT OR REPLACE INTO files (guid, path, extension, size, mod_time, hash, humanized_size) VALUES (?, ?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, file := range fileItems {
+		idx.files[file.Guid] = file
+		stmt.Exec(file.Guid, file.Path, file.Extension, file.Size, file.ModTime, file.Hash, file.HumanizedSize)
+		//if idx.config.Debug {
+		//	fmt.Printf("Debug: Adding %s to index\n", file.Guid)
+		//}
+	}
+
+	return tx.Commit()
 }
 
 func (idx *Index) Purge() (int, error) {

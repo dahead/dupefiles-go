@@ -103,6 +103,10 @@ func (a *App) ExportToJsonFile(filename string) error {
 }
 
 func (a *App) ExportToCSVFile(filename string) error {
+	return a.ExportToCSVFileWithSeparator(filename, ';')
+}
+
+func (a *App) ExportToCSVFileWithSeparator(filename string, separator rune) error {
 	files := a.index.GetAllDupes()
 
 	// No files in FileIndex skip
@@ -151,6 +155,7 @@ func (a *App) ExportToCSVFile(filename string) error {
 
 	// Create CSV writer
 	writer := csv.NewWriter(file)
+	writer.Comma = separator
 	defer writer.Flush()
 
 	// Write header

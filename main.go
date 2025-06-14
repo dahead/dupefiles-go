@@ -8,7 +8,7 @@ import (
 
 func main() {
 	// show app information text in the CLI and copyright info
-	fmt.Println("DupeFiles v0.1.4 - Copyright (c) 2025 dh")
+	fmt.Println("DupeFiles v0.1.3 - Copyright (c) 2025 dh")
 
 	// flags
 	var (

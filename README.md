@@ -109,6 +109,8 @@ go build -o df
 ./df --trash
 ```
 
+Note: on removable media like USB or SSD drives this currently does not work, because the app is trying to move the external files to the local trash. Instead you have to use --move /external/trash.directory/
+
 #### Remove duplicate files from database
 ```bash
 ./df --forget

@@ -246,6 +246,7 @@ func (idx *Index) Close() error {
 	return idx.db.Close()
 }
 
+// Todo: integrate or remove
 func (idx *Index) AddFile(path string) error {
 	fileInfo, err := os.Stat(path)
 	if err != nil {
@@ -418,9 +419,9 @@ func (idx *Index) AddFileItems(fileItems []*FileItem) error {
 	for _, file := range fileItems {
 		idx.files[file.Guid] = file
 		stmt.Exec(file.Guid, file.Path, file.Extension, file.Size, file.ModTime, file.Hash, file.HumanizedSize)
-		//if idx.config.Debug {
-		//	fmt.Printf("Debug: Adding %s to index\n", file.Guid)
-		//}
+		if idx.config.Debug {
+			fmt.Printf("Debug: Adding %s to index\n", file.Guid)
+		}
 	}
 
 	return tx.Commit()
@@ -558,7 +559,12 @@ func (idx *Index) Update() (int, error) {
 // Delete all known duplicates
 func (idx *Index) ForgetDuplicates() error {
 	result, err := idx.db.Exec(
-		"DELETE from files WHERE guid IN (SELECT guid FROM duplicates)",
+		// 			stmt, err := tx.Prepare(`
+		//               INSERT INTO duplicates (guid, scanned)
+		//               VALUES (?, ?)
+		//               ON CONFLICT(guid) DO UPDATE SET scanned = ?
+		//           `)
+		"DELETE from duplicates",
 	)
 	if err != nil {
 		return fmt.Errorf("failed to forget duplicates: %v", err)

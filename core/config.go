@@ -3,8 +3,11 @@ package core
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 )
+
+const DefaultIndexFilename = "dupefiles.db"
 
 // Config holds application configuration
 type Config struct {
@@ -20,8 +23,8 @@ func NewConfig() *Config {
 	config := &Config{
 		Debug:              false,
 		DryRun:             false,
-		MinFileSize:        1024,           // default minimum file size
-		DBFilename:         "dupefiles.db", // default database filename
+		MinFileSize:        1024,                      // default minimum file size
+		DBFilename:         GetDefaultIndexFilename(), // default database filename
 		BinaryCompareBytes: 0,
 	}
 
@@ -60,4 +63,22 @@ func NewConfig() *Config {
 	//}
 
 	return config
+}
+
+func GetDefaultIndexFilename() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to current directory if home dir can't be determined
+		return DefaultIndexFilename
+	}
+
+	configDir := filepath.Join(homeDir, ".config", "dupefiles")
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		// Fallback to current directory if config dir can't be created
+		return DefaultIndexFilename
+	}
+
+	return filepath.Join(configDir, DefaultIndexFilename)
 }

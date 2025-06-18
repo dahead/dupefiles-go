@@ -73,11 +73,11 @@ func main() {
 	case *exportcsv != "":
 		app.ExportToCSVFile(*exportcsv)
 	case *purgeIndex:
-		app.PurgeIndex()
+		app.IndexPurge()
 	case *updateIndex:
-		app.UpdateIndex()
+		app.IndexUpdate()
 	case *clearindex:
-		app.ClearIndex()
+		app.IndexClear()
 	case *forget:
 		app.IndexForgetDuplicateFiles()
 	case *headshot:

@@ -141,7 +141,7 @@ func (a *App) StartScan() {
 	}
 }
 
-func (a *App) PurgeIndex() {
+func (a *App) IndexPurge() {
 	count, err := a.index.Purge()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -150,7 +150,7 @@ func (a *App) PurgeIndex() {
 	fmt.Printf("Purged %d files from the database\n", count)
 }
 
-func (a *App) UpdateIndex() {
+func (a *App) IndexUpdate() {
 	count, err := a.index.Update()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -389,7 +389,7 @@ func (a *App) IndexForgetHashes() {
 	a.index.ForgetHashes()
 }
 
-func (a *App) ClearIndex() {
+func (a *App) IndexClear() {
 	// Todo: delete all from every table
 
 	// Begin transaction

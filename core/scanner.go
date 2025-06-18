@@ -90,7 +90,6 @@ func (s *Scanner) ScanForDuplicates() ([]ResultList, error) {
 	return results, nil
 }
 
-// Updated ScanByHash function
 func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*FileItem, error) {
 	hashGroups, hashesToUpdate, err := s.calculateHashGroups(sizeGroups)
 	if err != nil {
@@ -104,7 +103,6 @@ func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*Fi
 	return hashGroups, nil
 }
 
-// Calculates hashes for files and returns hash groups and pending DB updates
 func (s *Scanner) calculateHashGroups(sizeGroups map[int64][]*FileItem) (map[string][]*FileItem, []struct{ guid, hash string }, error) {
 	finalHashGroups := make(map[string][]*FileItem)
 	var allHashesToUpdate []struct{ guid, hash string }
@@ -164,7 +162,7 @@ func (s *Scanner) calculateHashGroups(sizeGroups map[int64][]*FileItem) (map[str
 							calculatedHash = jobFile.Hash.String
 						} else {
 							if s.idx.config.Debug {
-								fmt.Printf("  Calculating hash for %s\n", jobFile.Path)
+								fmt.Printf("  Calculating hash for file %s...\n", jobFile.Path)
 							}
 							calculatedHash, err = CalculateFileHash(jobFile.Path, jobFile.Size)
 						}
@@ -268,7 +266,7 @@ func (s *Scanner) findDuplicatesInHashGroup(hash string, filesInHashGroup []*Fil
 		wg.Add(1)
 		go func(fileToCompare *FileItem) {
 			defer wg.Done()
-			identical, err := CompareFilesBinaryRandom(filesInHashGroup[0].Path, fileToCompare.Path, s.idx.config.BinaryCompareBytes)
+			identical, err := compareFilesBinarySampleSize(filesInHashGroup[0].Path, fileToCompare.Path, s.idx.config.BinaryCompareBytes)
 			results <- struct {
 				file      *FileItem
 				identical bool

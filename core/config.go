@@ -15,7 +15,7 @@ type Config struct {
 	DryRun             bool   // Relevant for moving, trashing files. Set to true, only a simulation will follow. No files will get touched.
 	MinFileSize        int64  // Minimum file size in bytes
 	DBFilename         string // Database filename
-	BinaryCompareBytes int64  // Sample size for binary comparison. If 0 always the whole file gets compared. If > 0 only this amount of bytes get compared. The bytes are picked randomly across the whole file.
+	BinaryCompareBytes int    // Sample size for binary comparison. If 0 always the whole file gets compared. If > 0 only this amount of bytes get compared. The bytes are picked randomly across the whole file.
 }
 
 // NewConfig creates a new configuration with default values and environment variable overrides
@@ -52,15 +52,14 @@ func NewConfig() *Config {
 
 	// Read BinaryCompareBytes
 	if envBCS := os.Getenv("DF_BINARY_COMPARE_SIZE"); envBCS != "" {
-		if parsed, err := strconv.ParseInt(envBCS, 10, 64); err == nil {
+		if parsed, err := strconv.Atoi(envBCS); err == nil {
 			config.BinaryCompareBytes = parsed
-			fmt.Print("Environment variable read.")
 		}
 	}
 
-	//if config.Debug {
-	//	fmt.Println("Configuration loaded from environment variables. Debug is on.")
-	//}
+	if config.Debug {
+		fmt.Println("Configuration loaded from environment variables. Debug is on.")
+	}
 
 	return config
 }

@@ -26,159 +26,153 @@ func NewScanner(idx *Index) *Scanner {
 // ScanBySize groups files by size
 func (s *Scanner) ScanBySize() (map[int64][]*FileItem, error) {
 	sizeGroups := make(map[int64][]*FileItem)
-	// Use s.idx to access the files from the Index struct
 	fmt.Println("Scanning for size equivalent files...")
 	for _, file := range s.idx.files {
 		sizeGroups[file.Size] = append(sizeGroups[file.Size], file)
 	}
-
 	return sizeGroups, nil
 }
 
-// Calculates hashes for files in each size group
-func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*FileItem, error) {
-	finalHashGroups := make(map[string][]*FileItem)
-
-	fmt.Println("Scanning for hash equivalent files...")
-	totalSizeGroups := len(sizeGroups)
-	processedSizeGroups := 0
-
-	for size, filesInGroup := range sizeGroups {
-		processedSizeGroups++
-		if len(filesInGroup) < 2 {
-			continue
-		}
-
-		if s.idx.config.Debug {
-			fmt.Printf("- processing size group %d/%d (size: %s bytes, files: %d)\n",
-				processedSizeGroups, totalSizeGroups, HumanizeBytes(size), len(filesInGroup))
-		}
-
-		// fmt.Printf(".")
-
-		// create list of files to create hash sums
-		filesToHash := []*FileItem{}
-		for _, file := range filesInGroup {
-			if !file.Hash.Valid {
-				filesToHash = append(filesToHash, file)
-			} else {
-				finalHashGroups[file.Hash.String] = append(finalHashGroups[file.Hash.String], file)
-			}
-		}
-
-		// create hash sums
-		if len(filesToHash) > 0 {
-			type hashCalcResult struct {
-				file    *FileItem
-				hashStr string
-				err     error
-			}
-
-			numJobs := len(filesToHash)
-			jobsChan := make(chan *FileItem, numJobs)
-			resultsChan := make(chan hashCalcResult, numJobs)
-			var wg sync.WaitGroup
-
-			numWorkers := runtime.NumCPU()
-			if numWorkers > numJobs {
-				numWorkers = numJobs
-			}
-			// Ensure at least one worker
-			if numWorkers == 0 {
-				numWorkers = 1
-			}
-
-			if s.idx.config.Debug {
-				fmt.Printf("  Calculating %d hashes with %d workers...\n", numJobs, numWorkers)
-			}
-
-			for w := 0; w < numWorkers; w++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					for jobFile := range jobsChan {
-						var calculatedHash string
-						var err error
-						// First try to lookup hash in index
-						if jobFile.Hash.Valid && jobFile.Hash.String != "" {
-							// Hash already exists in index, use it
-							calculatedHash = jobFile.Hash.String
-						} else {
-							// Hash not found in index, calculate it
-
-							if s.idx.config.Debug {
-								fmt.Printf("  Calculating hash for %s\n", jobFile.Path)
-							}
-
-							calculatedHash, err = CalculateFileHash(jobFile.Path, jobFile.Size)
-						}
-
-						resultsChan <- hashCalcResult{file: jobFile, hashStr: calculatedHash, err: err}
-					}
-				}()
-			}
-
-			for _, file := range filesToHash {
-				jobsChan <- file
-			}
-			close(jobsChan)
-
-			wg.Wait()
-			close(resultsChan)
-
-			hashesToUpdateInDB := []struct {
-				guid string
-				hash string
-			}{}
-
-			for res := range resultsChan {
-				if res.err != nil {
-					fmt.Printf("  Warning: Failed to calculate hash for %s: %v\n", res.file.Path, res.err)
-					continue
-				}
-				res.file.Hash = sql.NullString{String: res.hashStr, Valid: true} // IndexUpdate in-memory FileItem
-				finalHashGroups[res.hashStr] = append(finalHashGroups[res.hashStr], res.file)
-				hashesToUpdateInDB = append(hashesToUpdateInDB, struct {
-					guid string
-					hash string
-				}{res.file.Guid, res.hashStr})
-			}
-
-			// Batch update hashes in DB
-			if len(hashesToUpdateInDB) > 0 {
-				tx, err := s.idx.db.Begin()
-				if err != nil {
-					fmt.Printf("  Warning: Failed to begin transaction for hash updates: %v\n", err)
-				} else {
-					stmt, err := tx.Prepare("UPDATE files SET hash = ? WHERE guid = ?")
-					if err != nil {
-						fmt.Printf("  Warning: Failed to prepare statement for hash updates: %v\n", err)
-						tx.Rollback()
-					} else {
-						updatedCount := 0
-						for _, h := range hashesToUpdateInDB {
-							_, err := stmt.Exec(h.hash, h.guid)
-							if err != nil {
-								fmt.Printf("  Warning: Failed to update hash for %s in DB: %v\n", h.guid, err)
-							} else {
-								updatedCount++
-							}
-						}
-						stmt.Close()
-						err = tx.Commit()
-						if err != nil {
-							fmt.Printf("  Warning: Failed to commit transaction for hash updates: %v\n", err)
-						} else {
-							// fmt.Printf("  Updated %d hashes in DB for current size group.\n", updatedCount)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return finalHashGroups, nil
-}
+//// Calculates hashes for files in each size group
+//func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*FileItem, error) {
+//	finalHashGroups := make(map[string][]*FileItem)
+//
+//	fmt.Println("Scanning for hash equivalent files...")
+//	totalSizeGroups := len(sizeGroups)
+//	processedSizeGroups := 0
+//
+//	for size, filesInGroup := range sizeGroups {
+//		processedSizeGroups++
+//		if len(filesInGroup) < 2 {
+//			continue
+//		}
+//
+//		if s.idx.config.Debug {
+//			fmt.Printf("- processing size group %d/%d (size: %s bytes, files: %d)\n",
+//				processedSizeGroups, totalSizeGroups, HumanizeBytes(size), len(filesInGroup))
+//		}
+//
+//		// create list of files to create hash sums
+//		filesToHash := []*FileItem{}
+//		for _, file := range filesInGroup {
+//			if !file.Hash.Valid {
+//				filesToHash = append(filesToHash, file)
+//			} else {
+//				finalHashGroups[file.Hash.String] = append(finalHashGroups[file.Hash.String], file)
+//			}
+//		}
+//
+//		// create hash sums
+//		if len(filesToHash) > 0 {
+//			type hashCalcResult struct {
+//				file    *FileItem
+//				hashStr string
+//				err     error
+//			}
+//
+//			numJobs := len(filesToHash)
+//			jobsChan := make(chan *FileItem, numJobs)
+//			resultsChan := make(chan hashCalcResult, numJobs)
+//			var wg sync.WaitGroup
+//
+//			numWorkers := runtime.NumCPU()
+//			if numWorkers > numJobs {
+//				numWorkers = numJobs
+//			}
+//			// Ensure at least one worker
+//			if numWorkers == 0 {
+//				numWorkers = 1
+//			}
+//
+//			if s.idx.config.Debug {
+//				fmt.Printf("  Calculating %d hashes with %d workers...\n", numJobs, numWorkers)
+//			}
+//
+//			for w := 0; w < numWorkers; w++ {
+//				wg.Add(1)
+//				go func() {
+//					defer wg.Done()
+//					for jobFile := range jobsChan {
+//						var calculatedHash string
+//						var err error
+//						// First try to lookup hash in index
+//						if jobFile.Hash.Valid && jobFile.Hash.String != "" {
+//							// Hash already exists in index, use it
+//							calculatedHash = jobFile.Hash.String
+//						} else {
+//							// Hash not found in index, calculate it
+//							if s.idx.config.Debug {
+//								fmt.Printf("  Calculating hash for %s\n", jobFile.Path)
+//							}
+//							calculatedHash, err = CalculateFileHash(jobFile.Path, jobFile.Size)
+//						}
+//
+//						resultsChan <- hashCalcResult{file: jobFile, hashStr: calculatedHash, err: err}
+//					}
+//				}()
+//			}
+//
+//			for _, file := range filesToHash {
+//				jobsChan <- file
+//			}
+//			close(jobsChan)
+//
+//			wg.Wait()
+//			close(resultsChan)
+//
+//			hashesToUpdateInDB := []struct {
+//				guid string
+//				hash string
+//			}{}
+//
+//			for res := range resultsChan {
+//				if res.err != nil {
+//					fmt.Printf("  Warning: Failed to calculate hash for %s: %v\n", res.file.Path, res.err)
+//					continue
+//				}
+//				res.file.Hash = sql.NullString{String: res.hashStr, Valid: true} // IndexUpdate in-memory FileItem
+//				finalHashGroups[res.hashStr] = append(finalHashGroups[res.hashStr], res.file)
+//				hashesToUpdateInDB = append(hashesToUpdateInDB, struct {
+//					guid string
+//					hash string
+//				}{res.file.Guid, res.hashStr})
+//			}
+//
+//			// Batch update hashes in DB
+//			if len(hashesToUpdateInDB) > 0 {
+//				tx, err := s.idx.db.Begin()
+//				if err != nil {
+//					fmt.Printf("  Warning: Failed to begin transaction for hash updates: %v\n", err)
+//				} else {
+//					stmt, err := tx.Prepare("UPDATE files SET hash = ? WHERE guid = ?")
+//					if err != nil {
+//						fmt.Printf("  Warning: Failed to prepare statement for hash updates: %v\n", err)
+//						tx.Rollback()
+//					} else {
+//						updatedCount := 0
+//						for _, h := range hashesToUpdateInDB {
+//							_, err := stmt.Exec(h.hash, h.guid)
+//							if err != nil {
+//								fmt.Printf("  Warning: Failed to update hash for %s in DB: %v\n", h.guid, err)
+//							} else {
+//								updatedCount++
+//							}
+//						}
+//						stmt.Close()
+//						err = tx.Commit()
+//						if err != nil {
+//							fmt.Printf("  Warning: Failed to commit transaction for hash updates: %v\n", err)
+//						} else {
+//							// fmt.Printf("  Updated %d hashes in DB for current size group.\n", updatedCount)
+//						}
+//					}
+//				}
+//			}
+//		}
+//	}
+//
+//	return finalHashGroups, nil
+//}
 
 func (s *Scanner) ScanForDuplicates() ([]ResultList, error) {
 	// Step 1: Group files by size
@@ -235,6 +229,159 @@ func (s *Scanner) ScanForDuplicates() ([]ResultList, error) {
 	}
 
 	return results, nil
+}
+
+// Updated ScanByHash function
+func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*FileItem, error) {
+	hashGroups, hashesToUpdate, err := s.calculateHashGroups(sizeGroups)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.updateHashesInIndex(hashesToUpdate); err != nil {
+		fmt.Printf("Warning: %v\n", err)
+	}
+
+	return hashGroups, nil
+}
+
+// Calculates hashes for files and returns hash groups and pending DB updates
+func (s *Scanner) calculateHashGroups(sizeGroups map[int64][]*FileItem) (map[string][]*FileItem, []struct{ guid, hash string }, error) {
+	finalHashGroups := make(map[string][]*FileItem)
+	var allHashesToUpdate []struct{ guid, hash string }
+
+	fmt.Println("Scanning for hash equivalent files...")
+	totalSizeGroups := len(sizeGroups)
+	processedSizeGroups := 0
+
+	for size, filesInGroup := range sizeGroups {
+		processedSizeGroups++
+		if len(filesInGroup) < 2 {
+			continue
+		}
+
+		if s.idx.config.Debug {
+			fmt.Printf("- processing size group %d/%d (size: %s bytes, files: %d)\n",
+				processedSizeGroups, totalSizeGroups, HumanizeBytes(size), len(filesInGroup))
+		}
+
+		// create list of files to create hash sums
+		filesToHash := []*FileItem{}
+		for _, file := range filesInGroup {
+			if !file.Hash.Valid {
+				filesToHash = append(filesToHash, file)
+			} else {
+				finalHashGroups[file.Hash.String] = append(finalHashGroups[file.Hash.String], file)
+			}
+		}
+
+		// create hash sums
+		if len(filesToHash) > 0 {
+			type hashCalcResult struct {
+				file    *FileItem
+				hashStr string
+				err     error
+			}
+
+			numJobs := len(filesToHash)
+			jobsChan := make(chan *FileItem, numJobs)
+			resultsChan := make(chan hashCalcResult, numJobs)
+			var wg sync.WaitGroup
+
+			numWorkers := runtime.NumCPU()
+			if numWorkers > numJobs {
+				numWorkers = numJobs
+			}
+			if numWorkers == 0 {
+				numWorkers = 1
+			}
+
+			if s.idx.config.Debug {
+				fmt.Printf("  Calculating %d hashes with %d workers...\n", numJobs, numWorkers)
+			}
+
+			for w := 0; w < numWorkers; w++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for jobFile := range jobsChan {
+						var calculatedHash string
+						var err error
+						if jobFile.Hash.Valid && jobFile.Hash.String != "" {
+							calculatedHash = jobFile.Hash.String
+						} else {
+							if s.idx.config.Debug {
+								fmt.Printf("  Calculating hash for %s\n", jobFile.Path)
+							}
+							calculatedHash, err = CalculateFileHash(jobFile.Path, jobFile.Size)
+						}
+						resultsChan <- hashCalcResult{file: jobFile, hashStr: calculatedHash, err: err}
+					}
+				}()
+			}
+
+			for _, file := range filesToHash {
+				jobsChan <- file
+			}
+			close(jobsChan)
+
+			wg.Wait()
+			close(resultsChan)
+
+			var hashesToUpdateInDB []struct{ guid, hash string }
+			for res := range resultsChan {
+				if res.err != nil {
+					fmt.Printf("  Warning: Failed to calculate hash for %s: %v\n", res.file.Path, res.err)
+					continue
+				}
+				res.file.Hash = sql.NullString{String: res.hashStr, Valid: true}
+				finalHashGroups[res.hashStr] = append(finalHashGroups[res.hashStr], res.file)
+				hashesToUpdateInDB = append(hashesToUpdateInDB, struct{ guid, hash string }{res.file.Guid, res.hashStr})
+			}
+
+			allHashesToUpdate = append(allHashesToUpdate, hashesToUpdateInDB...)
+		}
+	}
+
+	return finalHashGroups, allHashesToUpdate, nil
+}
+
+// Updates hash values in the database
+func (s *Scanner) updateHashesInIndex(hashesToUpdate []struct{ guid, hash string }) error {
+	if len(hashesToUpdate) == 0 {
+		return nil
+	}
+
+	tx, err := s.idx.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("UPDATE files SET hash = ? WHERE guid = ?")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	updatedCount := 0
+	for _, h := range hashesToUpdate {
+		_, err := stmt.Exec(h.hash, h.guid)
+		if err != nil {
+			fmt.Printf("  Warning: Failed to update hash for %s in DB: %v\n", h.guid, err)
+		} else {
+			updatedCount++
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	if s.idx.config.Debug {
+		fmt.Printf("  Updated %d hashes in DB.\n", updatedCount)
+	}
+	return nil
 }
 
 func (s *Scanner) findDuplicatesInHashGroup(hash string, filesInHashGroup []*FileItem) *ResultList {

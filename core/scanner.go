@@ -147,13 +147,7 @@ func (s *Scanner) calculateHashGroups(sizeGroups map[int64][]*FileItem) (map[str
 			resultsChan := make(chan hashCalcResult, numJobs)
 			var wg sync.WaitGroup
 
-			numWorkers := runtime.NumCPU()
-			if numWorkers > numJobs {
-				numWorkers = numJobs
-			}
-			if numWorkers == 0 {
-				numWorkers = 1
-			}
+			numWorkers := calculateOptimalWorkers(numJobs)
 
 			if s.idx.config.Debug {
 				fmt.Printf("  Calculating %d hashes with %d workers...\n", numJobs, numWorkers)
@@ -203,6 +197,17 @@ func (s *Scanner) calculateHashGroups(sizeGroups map[int64][]*FileItem) (map[str
 	}
 
 	return finalHashGroups, allHashesToUpdate, nil
+}
+
+func calculateOptimalWorkers(numJobs int) int {
+	numWorkers := runtime.NumCPU()
+	if numWorkers > numJobs {
+		numWorkers = numJobs
+	}
+	if numWorkers == 0 {
+		numWorkers = 1
+	}
+	return numWorkers
 }
 
 // Updates hash values in the database

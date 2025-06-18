@@ -3,7 +3,7 @@ package core
 import (
 	"bytes"
 	"crypto/md5"
-	"crypto/sha512"
+	"crypto/sha256"
 	"encoding/hex"
 	"hash"
 	"io"
@@ -16,7 +16,7 @@ const SizeThreshold = 2 * 1024 * 1024 * 1024 // 2GB
 
 func CalculateFileHash(filePath string, fileSize int64) (string, error) {
 	if fileSize > SizeThreshold {
-		return CalculateFileHashSHA512(filePath)
+		return CalculateFileHashSHA256(filePath)
 	} else {
 		return CalculateFileHashMD5(filePath)
 	}
@@ -38,7 +38,7 @@ func CalculateFileHashMD5(filePath string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func CalculateFileHashSHA512(filePath string) (string, error) {
+func CalculateFileHashSHA256(filePath string) (string, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return "", err
@@ -46,7 +46,7 @@ func CalculateFileHashSHA512(filePath string) (string, error) {
 	defer f.Close()
 
 	var h hash.Hash
-	h = sha512.New()
+	h = sha256.New()
 
 	if _, err = io.Copy(h, f); err != nil {
 		return "", err

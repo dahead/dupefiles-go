@@ -49,9 +49,6 @@ func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*Fi
 			continue
 		}
 
-		//fmt.Printf("Processing size group %d/%d\n",
-		//	processedSizeGroups, totalSizeGroups)
-
 		if s.idx.config.Debug {
 			fmt.Printf("- processing size group %d/%d (size: %s bytes, files: %d)\n",
 				processedSizeGroups, totalSizeGroups, HumanizeBytes(size), len(filesInGroup))
@@ -82,7 +79,7 @@ func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*Fi
 			resultsChan := make(chan hashCalcResult, numJobs)
 			var wg sync.WaitGroup
 
-			numWorkers := 8
+			numWorkers := runtime.NumCPU()
 			if numWorkers > numJobs {
 				numWorkers = numJobs
 			}
@@ -200,10 +197,6 @@ func (s *Scanner) ScanForDuplicates() ([]ResultList, error) {
 	fmt.Println("Verifying potential duplicates...")
 	var results []ResultList
 	var resultsMu sync.Mutex
-
-	if s.idx.config.Debug {
-		fmt.Printf("Final hash groups: %d\n", len(finalHashGroups))
-	}
 
 	var wg sync.WaitGroup
 	resultsChan := make(chan ResultList, len(finalHashGroups))

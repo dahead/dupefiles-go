@@ -35,14 +35,14 @@ func (a *App) Close() {
 }
 
 func (a *App) ShowConfig() {
-	fmt.Printf("Config:\n")
-	fmt.Printf("Debug: %v\n", a.config.Debug)
-	fmt.Printf("DryRun: %v\n", a.config.DryRun)
-	fmt.Printf("Database file: %s\n", a.index.GetIndexPath())
-	fmt.Printf("Minimum file size: %d bytes\n", a.config.MinFileSize)
-	fmt.Printf("Binary compare byte size: %d bytes\n", a.config.BinaryCompareBytes)
-	fmt.Printf("Database filename: %s\n", a.config.DBFilename)
-	fmt.Printf("System trash directory: %s\n", GetTrashPath())
+	fmt.Printf("*** Environment Configuration: ***\n")
+	fmt.Printf("- Debug: %v\n", a.config.Debug)
+	fmt.Printf("- DryRun: %v\n", a.config.DryRun)
+	fmt.Printf("- Database file: %s\n", a.index.GetIndexPath())
+	fmt.Printf("- Minimum file size: %d bytes\n", a.config.MinFileSize)
+	fmt.Printf("- Sample size in bytes for binary comparism: %d bytes\n", a.config.SampleSizeBinaryCompare)
+	fmt.Printf("- Database path: %s\n", a.config.DBFilename)
+	fmt.Printf("- System trash directory: %s\n", GetTrashPath())
 }
 
 func (a *App) ShowFiles() {
@@ -79,7 +79,7 @@ func (a *App) ShowHashes() {
 		fmt.Println("No hashed files in database")
 		return
 	}
-	// show each file path
+	// show each file hash
 	for _, file := range files {
 		fmt.Println(file.Path)
 	}
@@ -88,6 +88,7 @@ func (a *App) ShowHashes() {
 }
 
 func (a *App) StartScan() {
+
 	// No files in FileIndex skip
 	files := a.index.GetAllFiles()
 	if len(files) == 0 {
@@ -95,14 +96,20 @@ func (a *App) StartScan() {
 		return
 	}
 
-	// Todo: Start a  system timer and measure scan duration
-
+	// Start
+	start := time.Now()
 	scanner := NewScanner(a.index)              // Create scanner instance
 	results, err := scanner.ScanForDuplicates() // Call method on scanner
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Stop and calculate duration
+	duration := time.Since(start)
+	if a.config.Debug {
+		fmt.Printf("Scan finished in %v\n", duration)
 	}
 
 	// Print results

@@ -266,7 +266,7 @@ func (s *Scanner) findDuplicatesInHashGroup(hash string, filesInHashGroup []*Fil
 		wg.Add(1)
 		go func(fileToCompare *FileItem) {
 			defer wg.Done()
-			identical, err := compareFilesBinarySampleSize(filesInHashGroup[0].Path, fileToCompare.Path, s.idx.config.BinaryCompareBytes)
+			identical, err := compareFilesBinarySampleSize(filesInHashGroup[0].Path, fileToCompare.Path, s.idx.config.SampleSizeBinaryCompare)
 			results <- struct {
 				file      *FileItem
 				identical bool

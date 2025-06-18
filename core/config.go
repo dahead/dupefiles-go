@@ -11,21 +11,21 @@ const DefaultIndexFilename = "dupefiles.db"
 
 // Config holds application configuration
 type Config struct {
-	Debug              bool   // Show debug information. Todo!
-	DryRun             bool   // Relevant for moving, trashing files. Set to true, only a simulation will follow. No files will get touched.
-	MinFileSize        int64  // Minimum file size in bytes
-	DBFilename         string // Database filename
-	BinaryCompareBytes int    // Sample size for binary comparison. If 0 always the whole file gets compared. If > 0 only this amount of bytes get compared. The bytes are picked randomly across the whole file.
+	Debug                   bool   // Show debug information
+	DryRun                  bool   // Relevant for moving, trashing files. Set to true, only a simulation will follow. No files will get touched.
+	MinFileSize             int64  // Minimum file size in bytes
+	DBFilename              string // Database filename
+	SampleSizeBinaryCompare int    // Sample size for binary comparison. If 0 always the whole file gets compared. If > 0 only this amount of bytes get compared. The bytes are picked randomly across the whole file.
 }
 
 // NewConfig creates a new configuration with default values and environment variable overrides
 func NewConfig() *Config {
 	config := &Config{
-		Debug:              false,
-		DryRun:             false,
-		MinFileSize:        1024,                      // default minimum file size
-		DBFilename:         GetDefaultIndexFilename(), // default database filename
-		BinaryCompareBytes: 0,
+		Debug:                   false,
+		DryRun:                  false,
+		MinFileSize:             1024,                      // default minimum file size
+		DBFilename:              GetDefaultIndexFilename(), // default database filename
+		SampleSizeBinaryCompare: 0,
 	}
 
 	// Read Debug
@@ -50,10 +50,10 @@ func NewConfig() *Config {
 		config.DBFilename = envDBFile
 	}
 
-	// Read BinaryCompareBytes
+	// Read SampleSizeBinaryCompare
 	if envBCS := os.Getenv("DF_BINARY_COMPARE_SIZE"); envBCS != "" {
 		if parsed, err := strconv.Atoi(envBCS); err == nil {
-			config.BinaryCompareBytes = parsed
+			config.SampleSizeBinaryCompare = parsed
 		}
 	}
 

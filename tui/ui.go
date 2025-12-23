@@ -4,6 +4,8 @@ import (
 	"df/core"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -78,6 +80,7 @@ const (
 	dupesState
 	filteringState
 	movingState
+	browsingState
 )
 
 type messageMsg struct {
@@ -144,6 +147,18 @@ type mainModel struct {
 	quitting        bool
 	width           int
 	height          int
+
+	// Browser state
+	browserDir      string
+	browserFiles    []browserItem
+	browserCursor   int
+	browserSelected map[string]bool
+}
+
+type browserItem struct {
+	name  string
+	isDir bool
+	size  int64
 }
 
 func customDelegate(color lipgloss.Color) list.DefaultDelegate {
@@ -169,7 +184,8 @@ func NewModel(app *core.App) mainModel {
 	l.SetShowStatusBar(false)
 
 	indexItems := []list.Item{
-		item{title: "[1] Add Path", desc: "Add a file or folder to the index", id: "add_path"},
+		item{title: "[1] Add Path (Manual)", desc: "Enter a file or folder path manually", id: "add_path"},
+		item{title: "[B] Add Path (Browse)", desc: "Browse for files or folders to add", id: "browse_path"},
 		item{title: "[2] Remove Path", desc: "Remove a file or folder from the index", id: "remove_path"},
 		item{title: "[3] Show Indexed Files", desc: "List all files in the database", id: "files"},
 		item{title: "[4] Purge Index", desc: "Remove non-existing files from database", id: "purge"},
@@ -215,16 +231,17 @@ func NewModel(app *core.App) mainModel {
 	pg.PerPage = 10
 
 	return mainModel{
-		state:         menuState,
-		list:          l,
-		indexList:     il,
-		filesList:     fl,
-		configList:    cl,
-		spinner:       s,
-		textInput:     ti,
-		paginator:     pg,
-		app:           app,
-		selectedDupes: make(map[string]bool),
+		state:           menuState,
+		list:            l,
+		indexList:       il,
+		filesList:       fl,
+		configList:      cl,
+		spinner:         s,
+		textInput:       ti,
+		paginator:       pg,
+		app:             app,
+		selectedDupes:   make(map[string]bool),
+		browserSelected: make(map[string]bool),
 	}
 }
 
@@ -290,6 +307,7 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case filesLoadedMsg:
 		m.filesList.SetItems(msg.items)
+		m.state = filesState
 		return m, nil
 
 	case configLoadedMsg:
@@ -327,6 +345,8 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateFiltering(msg)
 	case movingState:
 		return m.updateMoving(msg)
+	case browsingState:
+		return m.updateBrowsing(msg)
 	case messageState:
 		return m.updateSubView(msg)
 	}
@@ -419,6 +439,11 @@ func (m mainModel) updateIndexMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textInput.Focus()
 			m.textInput.SetValue("")
 			return m, nil
+		case "b", "B":
+			m.state = browsingState
+			dir, _ := os.Getwd()
+			m.browserDir = dir
+			return m, m.loadDir(dir)
 		case "2":
 			m.state = removingPathState
 			m.textInput.Placeholder = "Enter text to match for removal..."
@@ -445,6 +470,11 @@ func (m mainModel) updateIndexMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.textInput.Focus()
 					m.textInput.SetValue("")
 					return m, nil
+				case "browse_path":
+					m.state = browsingState
+					dir, _ := os.Getwd()
+					m.browserDir = dir
+					return m, m.loadDir(dir)
 				case "remove_path":
 					m.state = removingPathState
 					m.textInput.Placeholder = "Enter text to match for removal..."
@@ -517,6 +547,125 @@ func (m mainModel) updateAddingPath(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
 	return m, cmd
+}
+
+func (m mainModel) updateBrowsing(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.state = indexState
+			return m, nil
+		case "up", "k":
+			if m.browserCursor > 0 {
+				m.browserCursor--
+			}
+		case "down", "j":
+			if m.browserCursor < len(m.browserFiles)-1 {
+				m.browserCursor++
+			}
+		case " ":
+			path := filepath.Join(m.browserDir, m.browserFiles[m.browserCursor].name)
+			if m.browserFiles[m.browserCursor].name == ".." {
+				return m, nil
+			}
+			m.browserSelected[path] = !m.browserSelected[path]
+		case "enter":
+			item := m.browserFiles[m.browserCursor]
+			if item.name == ".." {
+				m.browserDir = filepath.Dir(m.browserDir)
+				return m, m.loadDir(m.browserDir)
+			}
+			path := filepath.Join(m.browserDir, item.name)
+			if item.isDir {
+				m.browserDir = path
+				return m, m.loadDir(m.browserDir)
+			}
+		case "a":
+			return m, m.addSelectedPaths()
+		}
+	case dirLoadedMsg:
+		m.browserFiles = msg.files
+		m.browserCursor = 0
+		return m, nil
+	}
+	return m, nil
+}
+
+type dirLoadedMsg struct {
+	files []browserItem
+}
+
+func (m mainModel) loadDir(path string) tea.Cmd {
+	return func() tea.Msg {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return messageMsg{title: "Error", content: fmt.Sprintf("Error reading directory: %v", err)}
+		}
+
+		var items []browserItem
+		// Add parent directory option
+		items = append(items, browserItem{name: "..", isDir: true})
+
+		// Sort entries: directories first, then files, both alphabetically
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].IsDir() && !entries[j].IsDir() {
+				return true
+			}
+			if !entries[i].IsDir() && entries[j].IsDir() {
+				return false
+			}
+			return strings.ToLower(entries[i].Name()) < strings.ToLower(entries[j].Name())
+		})
+
+		for _, entry := range entries {
+			info, _ := entry.Info()
+			items = append(items, browserItem{
+				name:  entry.Name(),
+				isDir: entry.IsDir(),
+				size:  info.Size(),
+			})
+		}
+		return dirLoadedMsg{items}
+	}
+}
+
+func (m mainModel) addSelectedPaths() tea.Cmd {
+	return func() tea.Msg {
+		var paths []string
+		for path, selected := range m.browserSelected {
+			if selected {
+				paths = append(paths, path)
+			}
+		}
+
+		if len(paths) == 0 {
+			// If nothing selected, maybe add current item if it's not ".."
+			item := m.browserFiles[m.browserCursor]
+			if item.name != ".." {
+				paths = append(paths, filepath.Join(m.browserDir, item.name))
+			}
+		}
+
+		if len(paths) == 0 {
+			return messageMsg{title: "Add Path", content: "No paths selected to add."}
+		}
+
+		totalAdded := 0
+		for _, path := range paths {
+			added, err := m.app.AddPathToIndex(path, true, "")
+			if err != nil {
+				return messageMsg{title: "Error", content: fmt.Sprintf("Error adding path %s: %v", path, err)}
+			}
+			totalAdded += added
+		}
+
+		// Clear selection after adding
+		m.browserSelected = make(map[string]bool)
+
+		m.state = filesState
+		return messageMsg{title: "Success", content: fmt.Sprintf("Added %d files from %d paths", totalAdded, len(paths))}
+	}
 }
 
 func (m mainModel) updateRemovingPath(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1055,6 +1204,62 @@ func (m mainModel) moveSelected(dest string) tea.Cmd {
 	}
 }
 
+func (m mainModel) browsingView() string {
+	s := greenTitleStyle.Render("Browse Path") + "\n\n"
+	s += fmt.Sprintf("Current Directory: %s\n\n", m.browserDir)
+
+	maxItems := m.height - 10
+	if maxItems < 1 {
+		maxItems = 1
+	}
+
+	start := 0
+	if m.browserCursor >= maxItems {
+		start = m.browserCursor - maxItems + 1
+	}
+	end := start + maxItems
+	if end > len(m.browserFiles) {
+		end = len(m.browserFiles)
+	}
+
+	for i := start; i < end; i++ {
+		item := m.browserFiles[i]
+		cursor := " "
+		if m.browserCursor == i {
+			cursor = ">"
+		}
+
+		selected := "[ ]"
+		path := filepath.Join(m.browserDir, item.name)
+		if m.browserSelected[path] {
+			selected = "[x]"
+		}
+
+		if item.name == ".." {
+			selected = "   "
+		}
+
+		name := item.name
+		if item.isDir {
+			name += "/"
+		}
+
+		line := fmt.Sprintf("%s %s %s", cursor, selected, name)
+		if m.browserCursor == i {
+			s += lipgloss.NewStyle().Foreground(lipgloss.Color("#00AF5F")).Render(line) + "\n"
+		} else {
+			s += line + "\n"
+		}
+	}
+
+	if len(m.browserFiles) > maxItems {
+		s += fmt.Sprintf("\n ... (%d more) ...\n", len(m.browserFiles)-maxItems)
+	}
+
+	s += "\n (space) select • (enter) navigate • (a) add selected • (esc) back"
+	return s
+}
+
 func (m mainModel) View() string {
 	if m.quitting {
 		return ""
@@ -1084,6 +1289,8 @@ func (m mainModel) View() string {
 		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", blueTitleStyle.Render(" Filter Duplicates "), m.textInput.View())
 	case movingState:
 		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", blueTitleStyle.Render(" Move Selected Files "), m.textInput.View())
+	case browsingState:
+		content = m.browsingView()
 	case editingConfigState:
 		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", orangeTitleStyle.Render(" Edit Config "), m.textInput.View())
 	case messageState:

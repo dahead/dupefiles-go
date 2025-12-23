@@ -69,7 +69,12 @@ func main() {
 			filter = flag.Arg(0)
 		}
 		// First add the path to database
-		app.AddPathToIndex(*quickScan, true, filter)
+		count, err := app.AddPathToIndex(*quickScan, true, filter)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Updated %d files\n", count)
 		// Then scan for duplicates
 		app.StartScan()
 	case *addPath != "":
@@ -79,9 +84,19 @@ func main() {
 		if flag.NArg() > 0 {
 			filter = flag.Arg(0)
 		}
-		app.AddPathToIndex(*addPath, true, filter)
+		count, err := app.AddPathToIndex(*addPath, true, filter)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Updated %d files\n", count)
 	case *removePath != "":
-		app.RemovePathFromIndex(*removePath)
+		count, err := app.RemovePathFromIndex(*removePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Removed %d files from database\n", count)
 	case *export:
 		app.Export()
 	case *exportjson != "":

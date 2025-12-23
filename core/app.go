@@ -32,6 +32,10 @@ func (a *App) GetIndex() *Index {
 	return a.index
 }
 
+func (a *App) GetConfig() *Config {
+	return a.config
+}
+
 func (a *App) Close() {
 	if a.index != nil {
 		a.index.Close()
@@ -170,10 +174,9 @@ func (a *App) IndexUpdate() {
 	fmt.Printf("Updated %d files in the database\n", count)
 }
 
-func (a *App) AddPathToIndex(path string, recursive bool, filter string) {
+func (a *App) AddPathToIndex(path string, recursive bool, filter string) (int, error) {
 	if path == "" {
-		fmt.Fprintf(os.Stderr, "Error: No path specified\n")
-		os.Exit(1)
+		return 0, fmt.Errorf("no path specified")
 	}
 
 	// remember  current amount of indexed files
@@ -182,20 +185,16 @@ func (a *App) AddPathToIndex(path string, recursive bool, filter string) {
 	// add directory or file
 	fileItems, err := a.getFileInfos(path, recursive, filter)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return 0, err
 	}
 	err = a.index.AddFileItems(fileItems)
+	if err != nil {
+		return 0, err
+	}
 
 	// remember new amount of indexed files
 	newCount := len(a.index.GetAllFiles())
-	// display changed files
-	fmt.Printf("Updated %d files\n", newCount-currentCount)
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	return newCount - currentCount, nil
 }
 
 func (a *App) getFileInfos(dirPath string, recursive bool, filter string) ([]*FileItem, error) {
@@ -243,17 +242,15 @@ func (a *App) getFileInfos(dirPath string, recursive bool, filter string) ([]*Fi
 	return fileItems, err
 }
 
-func (a *App) RemovePathFromIndex(path string) {
+func (a *App) RemovePathFromIndex(path string) (int64, error) {
 	if path == "" {
-		fmt.Fprintf(os.Stderr, "Error: No path specified\n")
-		os.Exit(1)
+		return 0, fmt.Errorf("no path specified")
 	}
 
 	// Check if path exists
 	_, err := os.Stat(path)
 	if err != nil && !os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return 0, err
 	}
 
 	// Normalize path for comparison
@@ -262,37 +259,32 @@ func (a *App) RemovePathFromIndex(path string) {
 	// Begin transaction
 	tx, err := a.index.db.Begin()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to begin transaction: %v\n", err)
-		os.Exit(1)
+		return 0, fmt.Errorf("failed to begin transaction: %v", err)
 	}
 	defer tx.Rollback() // Rollback if not committed
 
 	// Prepare statement for deleting files
 	stmt, err := tx.Prepare("DELETE FROM files WHERE path = ? OR path LIKE ?")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to prepare statement: %v\n", err)
-		os.Exit(1)
+		return 0, fmt.Errorf("failed to prepare statement: %v", err)
 	}
 	defer stmt.Close()
 
 	// Execute statement
 	result, err := stmt.Exec(normalizedPath, normalizedPath+string(filepath.Separator)+"%")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to execute statement: %v\n", err)
-		os.Exit(1)
+		return 0, fmt.Errorf("failed to execute statement: %v", err)
 	}
 
 	// Get number of affected rows
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to get rows affected: %v\n", err)
-		os.Exit(1)
+		return 0, fmt.Errorf("failed to get rows affected: %v", err)
 	}
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to commit transaction: %v\n", err)
-		os.Exit(1)
+		return 0, fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
 	// Remove from in-memory index
@@ -304,7 +296,7 @@ func (a *App) RemovePathFromIndex(path string) {
 		}
 	}
 
-	fmt.Printf("Removed %d files from database\n", rowsAffected)
+	return rowsAffected, nil
 }
 
 func (a *App) MoveDuplicateFilesToDirectory(path string) {

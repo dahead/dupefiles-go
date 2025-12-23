@@ -28,6 +28,10 @@ func NewApp() *App {
 	}
 }
 
+func (a *App) GetIndex() *Index {
+	return a.index
+}
+
 func (a *App) Close() {
 	if a.index != nil {
 		a.index.Close()

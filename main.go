@@ -2,13 +2,15 @@ package main
 
 import (
 	"df/core"
+	"df/tui"
 	"flag"
 	"fmt"
+	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
-	fmt.Println("DupeFiles v0.1.4 - Copyright (c) 2025 dh")
-
 	// flags
 	var (
 		addPath     = flag.String("add", "", "Add path to database")
@@ -29,11 +31,25 @@ func main() {
 		trash       = flag.Bool("trash", false, "Move duplicate files to trash")
 		forget      = flag.Bool("forget", false, "Remove duplicate files from database")
 		headshot    = flag.Bool("headshot", false, "Remove hashes from database")
+		tuiMode     = flag.Bool("tui", false, "Start TUI mode")
 	)
 	flag.Parse()
 
 	// start
 	app := core.NewApp()
+	defer app.Close()
+
+	// If no flags are provided, or -tui is set, start TUI
+	if flag.NFlag() == 0 || *tuiMode {
+		p := tea.NewProgram(tui.NewModel(app), tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			fmt.Printf("Alas, there's been an error: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	fmt.Println("DupeFiles v0.1.4 - Copyright (c) 2025 dh")
 
 	switch {
 	case *showConfig:

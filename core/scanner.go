@@ -11,8 +11,10 @@ import (
 const sizeThreshold = 2 * 1024 * 1024 * 1024 // 2GB
 
 type ResultList struct {
-	HashSum   string
+	Hash      string
+	Size      int64
 	FileGuids []string
+	Files     []*FileItem
 }
 
 type Scanner struct {
@@ -358,8 +360,10 @@ func (s *Scanner) findDuplicatesInHashGroup(hash string, filesInHashGroup []*Fil
 			duplicateGuids = append(duplicateGuids, f.Guid)
 		}
 		return &ResultList{
-			HashSum:   hash,
+			Hash:      hash,
+			Size:      actualDuplicatesThisGroup[0].Size,
 			FileGuids: duplicateGuids,
+			Files:     actualDuplicatesThisGroup,
 		}
 	}
 

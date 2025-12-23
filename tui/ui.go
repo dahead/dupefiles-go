@@ -989,7 +989,7 @@ func (m mainModel) flattenGroups(groups []core.ResultList) ([]resultItem, []*cor
 		if groupMatch {
 			allItems = append(allItems, resultItem{
 				isHeader: true,
-				hash:     group.HashSum,
+				hash:     group.Hash,
 				group:    group,
 			})
 			allItems = append(allItems, groupItems...)
@@ -1249,7 +1249,7 @@ func (m mainModel) moveSelected(dest string) tea.Cmd {
 			}
 			if len(newGuids) >= 2 {
 				newResults = append(newResults, core.ResultList{
-					HashSum:   group.HashSum,
+					Hash:      group.Hash,
 					FileGuids: newGuids,
 				})
 			}
@@ -1561,7 +1561,7 @@ func (m mainModel) trashSelected(allFiles []*core.FileItem) tea.Cmd {
 			}
 			if len(newGuids) >= 2 {
 				newResults = append(newResults, core.ResultList{
-					HashSum:   group.HashSum,
+					Hash:      group.Hash,
 					FileGuids: newGuids,
 				})
 			}
@@ -1615,7 +1615,7 @@ func (m mainModel) deleteSelected(allFiles []*core.FileItem) tea.Cmd {
 			}
 			if len(newGuids) >= 2 {
 				newResults = append(newResults, core.ResultList{
-					HashSum:   group.HashSum,
+					Hash:      group.Hash,
 					FileGuids: newGuids,
 				})
 			}

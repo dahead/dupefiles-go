@@ -3,6 +3,7 @@ package main
 import (
 	"df/core"
 	"df/tui"
+	"df/web"
 	"flag"
 	"fmt"
 	"os"
@@ -32,6 +33,8 @@ func main() {
 		forget      = flag.Bool("forget", false, "Remove duplicate files from database")
 		headshot    = flag.Bool("headshot", false, "Remove hashes from database")
 		tuiMode     = flag.Bool("tui", false, "Start TUI mode")
+		webMode     = flag.Bool("webserver", false, "Start Webserver mode")
+		webPort     = flag.Int("port", 8080, "Webserver port")
 	)
 	flag.Parse()
 
@@ -40,7 +43,27 @@ func main() {
 	defer app.Close()
 
 	// If no flags are provided, or -tui is set, start TUI
-	if flag.NFlag() == 0 || *tuiMode {
+	if *tuiMode {
+		m := tui.NewModel(app)
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		app.SetProgram(p)
+		if _, err := p.Run(); err != nil {
+			fmt.Printf("Alas, there's been an error: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *webMode {
+		ws := web.NewWebServer(app, *webPort)
+		if err := ws.Start(); err != nil {
+			fmt.Printf("Webserver error: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if flag.NFlag() == 0 {
 		m := tui.NewModel(app)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		app.SetProgram(p)

@@ -145,7 +145,7 @@ func (a *App) StartScan() {
 		totalDuplicateFiles := 0
 
 		for i, result := range results {
-			fmt.Printf("\nGroup %d (Hash: %s):\n", i+1, result.HashSum)
+			fmt.Printf("\nGroup %d (Hash: %s):\n", i+1, result.Hash)
 			groupSize := int64(0)
 			var firstFile *FileItem
 

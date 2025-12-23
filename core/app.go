@@ -299,6 +299,74 @@ func (a *App) RemovePathFromIndex(path string) (int64, error) {
 	return rowsAffected, nil
 }
 
+func (a *App) MoveFilesToDirectory(files []*FileItem, path string) (int, error) {
+	if len(files) == 0 {
+		return 0, nil
+	}
+
+	// Ensure the target directory exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		err := os.MkdirAll(path, 0755)
+		if err != nil {
+			return 0, fmt.Errorf("failed to create directory: %v", err)
+		}
+	}
+
+	movedCount := 0
+	for _, file := range files {
+		// Get the base filename from the original path
+		baseFileName := filepath.Base(file.Path)
+		// Create the destination path by joining the target directory with the filename
+		destPath := filepath.Join(path, baseFileName)
+
+		// Check if destination file already exists
+		if _, err := os.Stat(destPath); err == nil {
+			// File exists, create a unique name
+			ext := filepath.Ext(baseFileName)
+			name := baseFileName[:len(baseFileName)-len(ext)]
+			destPath = filepath.Join(path, fmt.Sprintf("%s_%d%s", name, time.Now().UnixNano(), ext))
+		}
+
+		if a.config.DryRun {
+			fmt.Printf("Would move %s to %s\n", file.Path, destPath)
+			continue
+		}
+
+		err := os.Rename(file.Path, destPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error moving %s: %v\n", file.Path, err)
+			continue
+		}
+
+		// Update the file path in the database
+		oldGuid := file.Guid
+		file.Path = destPath
+		file.Guid = filepath.Clean(destPath)
+
+		// Update the database
+		_, err = a.index.db.Exec(
+			"UPDATE files SET path = ?, guid = ? WHERE guid = ?",
+			file.Path, file.Guid, oldGuid,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error updating database for %s: %v\n", file.Path, err)
+		}
+
+		// Update the in-memory index
+		delete(a.index.files, oldGuid)
+		a.index.files[file.Guid] = file
+
+		movedCount++
+	}
+
+	return movedCount, nil
+}
+
+func (a *App) MoveFilesToTrash(files []*FileItem) (int, error) {
+	trashpath := GetTrashPath()
+	return a.MoveFilesToDirectory(files, trashpath)
+}
+
 func (a *App) MoveDuplicateFilesToDirectory(path string) {
 	if path == "" {
 		fmt.Fprintf(os.Stderr, "Error: No path specified\n")
@@ -393,51 +461,10 @@ func (a *App) IndexForgetHashes() {
 }
 
 func (a *App) IndexClear() {
-	// Todo: delete all from every table
-
-	// Begin transaction
-	tx, err := a.index.db.Begin()
+	err := a.index.Clear()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to begin transaction: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "Error clearing index: %v\n", err)
+		return
 	}
-	defer tx.Rollback() // Rollback if not committed
-
-	// Prepare statement for deleting files
-	// Todo: also delete duplicates table?
-	stmt, err := tx.Prepare("DELETE FROM files")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to prepare statement: %v\n", err)
-		os.Exit(1)
-	}
-	defer stmt.Close()
-
-	// Execute statement
-	result, err := stmt.Exec()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to execute statement: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Get number of affected rows
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to get rows affected: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to commit transaction: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Remove from in-memory index
-	removedFromMemory := 0
-	for guid := range a.index.files {
-		delete(a.index.files, guid)
-		removedFromMemory++
-	}
-
-	fmt.Printf("Removed %d files from database\n", rowsAffected)
+	fmt.Println("Database cleared")
 }

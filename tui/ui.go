@@ -3,11 +3,14 @@ package tui
 import (
 	"df/core"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/paginator"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,6 +26,17 @@ var (
 			Foreground(lipgloss.Color("#FAFAFA")).
 			Background(lipgloss.Color("#3C3C3C")).
 			Padding(0, 1)
+
+	hashColors = []lipgloss.Color{
+		lipgloss.Color("#88d2ff"),
+		lipgloss.Color("#ff88d2"),
+		lipgloss.Color("#d2ff88"),
+		lipgloss.Color("#ff9d88"),
+		lipgloss.Color("#88ff9d"),
+		lipgloss.Color("#9d88ff"),
+		lipgloss.Color("#ffd288"),
+		lipgloss.Color("#88ffd2"),
+	}
 )
 
 type state int
@@ -34,10 +48,15 @@ const (
 	configState
 	editingConfigState
 	filesState
+	indexState
 	addingPathState
+	removingPathState
 	confirmClearState
 	messageState
 	errorState
+	dupesState
+	filteringState
+	movingState
 )
 
 type messageMsg struct {
@@ -69,6 +88,13 @@ type configItem struct {
 	id    string
 }
 
+type resultItem struct {
+	isHeader bool
+	hash     string
+	file     *core.FileItem
+	group    *core.ResultList
+}
+
 func (i configItem) Title() string       { return i.key }
 func (i configItem) Description() string { return i.value }
 func (i configItem) FilterValue() string { return i.key }
@@ -76,14 +102,20 @@ func (i configItem) FilterValue() string { return i.key }
 type mainModel struct {
 	state           state
 	list            list.Model
+	indexList       list.Model
 	filesList       list.Model
 	configList      list.Model
+	dupesList       list.Model
 	spinner         spinner.Model
 	textInput       textinput.Model
+	paginator       paginator.Model
 	app             *core.App
 	err             error
 	results         []core.ResultList
 	files           []*core.FileItem
+	selectedDupes   map[string]bool
+	dupeFilter      string
+	dupeCursor      int
 	editingConfigID string
 	msgTitle        string
 	msgContent      string
@@ -95,11 +127,8 @@ type mainModel struct {
 func NewModel(app *core.App) mainModel {
 	items := []list.Item{
 		item{title: "Start Scan", desc: "Scan for duplicate files", id: "scan"},
-		item{title: "Show Indexed Files", desc: "List all files in the database", id: "files"},
+		item{title: "Database (Index)", desc: "Manage indexed files and folders", id: "index"},
 		item{title: "Show Duplicates", desc: "Show duplicates found in previous scans", id: "dupes"},
-		item{title: "Purge Index", desc: "Remove non-existing files from database", id: "purge"},
-		item{title: "Update Index", desc: "Update file hashes in the database", id: "update"},
-		item{title: "Clear Index", desc: "Clear all files from the database", id: "clear"},
 		item{title: "Config", desc: "Show current configuration", id: "config"},
 		item{title: "Exit", desc: "Quit the application", id: "exit"},
 	}
@@ -107,6 +136,18 @@ func NewModel(app *core.App) mainModel {
 	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "DupeFiles TUI"
 	l.Styles.Title = titleStyle
+
+	indexItems := []list.Item{
+		item{title: "Add Path", desc: "Add a file or folder to the index", id: "add_path"},
+		item{title: "Remove Path", desc: "Remove a file or folder from the index", id: "remove_path"},
+		item{title: "Show Indexed Files", desc: "List all files in the database", id: "files"},
+		item{title: "Purge Index", desc: "Remove non-existing files from database", id: "purge"},
+		item{title: "Update Index", desc: "Update file hashes in the database", id: "update"},
+		item{title: "Clear Index", desc: "Clear all files from the database", id: "clear"},
+	}
+	il := list.New(indexItems, list.NewDefaultDelegate(), 0, 0)
+	il.Title = "Database (Index) Management"
+	il.Styles.Title = titleStyle
 
 	fl := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	fl.Title = "Indexed Files"
@@ -135,14 +176,21 @@ func NewModel(app *core.App) mainModel {
 	ti := textinput.New()
 	ti.Placeholder = "Enter path to add..."
 
+	pg := paginator.New()
+	pg.Type = paginator.Dots
+	pg.PerPage = 10
+
 	return mainModel{
-		state:      menuState,
-		list:       l,
-		filesList:  fl,
-		configList: cl,
-		spinner:    s,
-		textInput:  ti,
-		app:        app,
+		state:         menuState,
+		list:          l,
+		indexList:     il,
+		filesList:     fl,
+		configList:    cl,
+		spinner:       s,
+		textInput:     ti,
+		paginator:     pg,
+		app:           app,
+		selectedDupes: make(map[string]bool),
 	}
 }
 
@@ -159,14 +207,20 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
+		case "q":
+			if m.state == menuState {
+				m.quitting = true
+				return m, tea.Quit
+			}
 		}
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.list.SetSize(msg.Width, msg.Height-4)
+		m.indexList.SetSize(msg.Width, msg.Height-4)
 		m.filesList.SetSize(msg.Width, msg.Height-4)
 		m.configList.SetSize(msg.Width, msg.Height-4)
 		return m, nil
@@ -175,6 +229,16 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = resultsState
 		m.results = msg.results
 		m.err = msg.err
+		// Auto select: keep first, select others
+		for _, group := range m.results {
+			for i, guid := range group.FileGuids {
+				if i == 0 {
+					m.selectedDupes[guid] = false
+				} else {
+					m.selectedDupes[guid] = true
+				}
+			}
+		}
 		return m, nil
 
 	case messageMsg:
@@ -200,6 +264,8 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.state {
 	case menuState:
 		return m.updateMenu(msg)
+	case indexState:
+		return m.updateIndexMenu(msg)
 	case scanningState:
 		return m.updateScanning(msg)
 	case resultsState:
@@ -208,12 +274,18 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateFiles(msg)
 	case addingPathState:
 		return m.updateAddingPath(msg)
+	case removingPathState:
+		return m.updateRemovingPath(msg)
 	case configState:
 		return m.updateConfig(msg)
 	case editingConfigState:
 		return m.updateEditingConfig(msg)
 	case confirmClearState:
 		return m.updateConfirmClear(msg)
+	case filteringState:
+		return m.updateFiltering(msg)
+	case movingState:
+		return m.updateMoving(msg)
 	case messageState:
 		return m.updateSubView(msg)
 	}
@@ -231,23 +303,26 @@ func (m mainModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "scan":
 					m.state = scanningState
 					return m, tea.Batch(m.startScan(), m.spinner.Tick)
-				case "files":
-					m.state = filesState
-					return m, m.refreshFiles()
+				case "index":
+					m.state = indexState
+					return m, nil
 				case "dupes":
 					m.state = resultsState
 					m.results = m.getDupes()
+					// Auto select: keep first, select others
+					for _, group := range m.results {
+						for i, guid := range group.FileGuids {
+							if i == 0 {
+								m.selectedDupes[guid] = false
+							} else {
+								m.selectedDupes[guid] = true
+							}
+						}
+					}
 					return m, nil
 				case "config":
 					m.state = configState
 					return m, m.refreshConfig()
-				case "purge":
-					return m, m.purgeIndex()
-				case "update":
-					return m, m.updateIndex()
-				case "clear":
-					m.state = confirmClearState
-					return m, nil
 				case "exit":
 					m.quitting = true
 					return m, tea.Quit
@@ -258,6 +333,49 @@ func (m mainModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m mainModel) updateIndexMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc", "backspace":
+			m.state = menuState
+			return m, nil
+		case "enter":
+			i, ok := m.indexList.SelectedItem().(item)
+			if ok {
+				switch i.id {
+				case "add_path":
+					m.state = addingPathState
+					m.textInput.Placeholder = "Enter path to add..."
+					m.textInput.Focus()
+					m.textInput.SetValue("")
+					return m, nil
+				case "remove_path":
+					m.state = removingPathState
+					m.textInput.Placeholder = "Enter text to match for removal..."
+					m.textInput.Focus()
+					m.textInput.SetValue("")
+					return m, nil
+				case "files":
+					m.state = filesState
+					return m, m.refreshFiles()
+				case "purge":
+					return m, m.purgeIndex()
+				case "update":
+					return m, m.updateIndex()
+				case "clear":
+					m.state = confirmClearState
+					return m, nil
+				}
+			}
+		}
+	}
+
+	var cmd tea.Cmd
+	m.indexList, cmd = m.indexList.Update(msg)
 	return m, cmd
 }
 
@@ -291,14 +409,38 @@ func (m mainModel) updateAddingPath(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
-			m.state = filesState
+			m.state = indexState
 			return m, nil
 		case "enter":
 			path := m.textInput.Value()
 			if path != "" {
+				m.state = indexState
 				return m, m.addPath(path)
 			}
-			m.state = filesState
+			m.state = indexState
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m mainModel) updateRemovingPath(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.state = indexState
+			return m, nil
+		case "enter":
+			path := m.textInput.Value()
+			if path != "" {
+				m.state = indexState
+				return m, m.removePath(path)
+			}
+			m.state = indexState
 			return m, nil
 		}
 	}
@@ -405,11 +547,11 @@ type configLoadedMsg struct{ items []list.Item }
 
 func (m mainModel) removePath(path string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := m.app.RemovePathFromIndex(path)
+		count, err := m.app.RemovePathFromIndex(path)
 		if err != nil {
 			return messageMsg{title: "Error", content: fmt.Sprintf("Error removing path: %v", err)}
 		}
-		return m.refreshFiles()()
+		return messageMsg{title: "Success", content: fmt.Sprintf("Removed %d files from the database", count)}
 	}
 }
 
@@ -445,17 +587,9 @@ func (m mainModel) toggleConfig(id string) tea.Cmd {
 }
 
 func (m mainModel) getDupes() []core.ResultList {
-	// core.ResultList is not what GetAllDupes returns.
-	// GetAllDupes returns []*FileItem.
-	// We might need to reconstruct ResultList or just change how we display them.
-	// Actually, let's just use the scanner to get the results again if needed,
-	// or look at how App.ShowDupes does it.
-
-	// App.ShowDupes just prints the files.
-	// Let's see if we can get the groups.
-
-	// For now, let's just return what we have in results or empty
-	return m.results
+	scanner := core.NewScanner(m.app.GetIndex())
+	results, _ := scanner.ScanForDuplicates()
+	return results
 }
 
 func (m mainModel) updateScanning(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -482,12 +616,220 @@ func (m mainModel) updateConfirmClear(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m mainModel) updateSubView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "esc" || msg.String() == "backspace" || msg.String() == "q" || msg.String() == "enter" {
-			m.state = menuState
+		if m.state == resultsState {
+			return m.updateResults(msg)
+		}
+		if msg.String() == "esc" || msg.String() == "backspace" || msg.String() == "q" {
+			if m.state == indexState {
+				m.state = menuState
+			} else if m.state == messageState {
+				m.state = menuState // Default back to menu from message
+			} else {
+				m.state = menuState
+			}
 			return m, nil
 		}
 	}
 	return m, nil
+}
+
+func (m mainModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Get flattened items for navigation and selection
+	var allItems []resultItem
+	var allFiles []*core.FileItem
+
+	for gIdx, group := range m.results {
+		groupMatch := false
+		var groupItems []resultItem
+
+		for _, guid := range group.FileGuids {
+			file := m.app.GetIndex().GetFileByGuid(guid)
+			if file != nil {
+				if m.dupeFilter == "" || strings.Contains(strings.ToLower(file.Path), strings.ToLower(m.dupeFilter)) {
+					groupMatch = true
+					groupItems = append(groupItems, resultItem{
+						isHeader: false,
+						file:     file,
+						group:    &m.results[gIdx],
+					})
+					allFiles = append(allFiles, file)
+				}
+			}
+		}
+
+		if groupMatch {
+			allItems = append(allItems, resultItem{
+				isHeader: true,
+				hash:     group.HashSum,
+				group:    &m.results[gIdx],
+			})
+			allItems = append(allItems, groupItems...)
+		}
+	}
+
+	start, end := m.paginator.GetSliceBounds(len(allItems))
+	pagedItems := allItems[start:end]
+
+	switch msg.String() {
+	case "esc", "q":
+		m.state = menuState
+		return m, nil
+	case "up", "k":
+		if m.dupeCursor > 0 {
+			m.dupeCursor--
+		} else if m.paginator.Page > 0 {
+			m.paginator.Page--
+			m.dupeCursor = m.paginator.PerPage - 1
+		}
+		return m, nil
+	case "down", "j":
+		if m.dupeCursor < len(pagedItems)-1 {
+			m.dupeCursor++
+		} else if m.paginator.Page < m.paginator.TotalPages-1 {
+			m.paginator.Page++
+			m.dupeCursor = 0
+		}
+		return m, nil
+	case "f":
+		m.state = filteringState
+		m.textInput.Placeholder = "Enter filter text..."
+		m.textInput.Focus()
+		m.textInput.SetValue(m.dupeFilter)
+		return m, nil
+	case " ":
+		if len(pagedItems) > 0 && m.dupeCursor < len(pagedItems) {
+			item := pagedItems[m.dupeCursor]
+			if item.isHeader {
+				// Toggle whole group (except first one which is original, maybe?
+				// Actually requirement says "checks/unchecks each file in the group which is a duplicate file"
+				// Usually this means all except the first one.
+
+				// Let's find if any in group (except first) is unchecked
+				anyUnchecked := false
+				for i, guid := range item.group.FileGuids {
+					if i == 0 {
+						continue
+					}
+					if !m.selectedDupes[guid] {
+						anyUnchecked = true
+						break
+					}
+				}
+
+				for i, guid := range item.group.FileGuids {
+					if i == 0 {
+						continue
+					}
+					m.selectedDupes[guid] = anyUnchecked
+				}
+			} else {
+				guid := item.file.Guid
+				m.selectedDupes[guid] = !m.selectedDupes[guid]
+			}
+		}
+		return m, nil
+	case "a":
+		// Auto select: keep first, select others
+		for _, group := range m.results {
+			for i, guid := range group.FileGuids {
+				if i == 0 {
+					m.selectedDupes[guid] = false
+				} else {
+					m.selectedDupes[guid] = true
+				}
+			}
+		}
+		return m, nil
+	case "e":
+		return m, m.exportSelected(allFiles)
+	case "m":
+		m.state = movingState
+		m.textInput.Placeholder = "Enter destination path..."
+		m.textInput.Focus()
+		m.textInput.SetValue("")
+		return m, nil
+	case "t":
+		return m, m.trashSelected(allFiles)
+	}
+
+	var cmd tea.Cmd
+	m.paginator, cmd = m.paginator.Update(msg)
+	return m, cmd
+}
+
+func (m mainModel) updateFiltering(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.state = resultsState
+			return m, nil
+		case "enter":
+			m.dupeFilter = m.textInput.Value()
+			m.state = resultsState
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m mainModel) updateMoving(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.state = resultsState
+			return m, nil
+		case "enter":
+			dest := m.textInput.Value()
+			if dest != "" {
+				m.state = resultsState
+				return m, m.moveSelected(dest)
+			}
+			m.state = resultsState
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m mainModel) moveSelected(dest string) tea.Cmd {
+	return func() tea.Msg {
+		// Get flattened files for navigation and selection
+		var selected []*core.FileItem
+		for _, group := range m.results {
+			for _, guid := range group.FileGuids {
+				file := m.app.GetIndex().GetFileByGuid(guid)
+				if file != nil {
+					if m.selectedDupes[file.Guid] {
+						selected = append(selected, file)
+					}
+				}
+			}
+		}
+
+		if len(selected) == 0 {
+			return messageMsg{title: "Move", content: "No files selected for move."}
+		}
+
+		count, err := m.app.MoveFilesToDirectory(selected, dest)
+		if err != nil {
+			return messageMsg{title: "Error", content: fmt.Sprintf("Error moving files: %v", err)}
+		}
+
+		// Clear selection after action
+		for _, file := range selected {
+			delete(m.selectedDupes, file.Guid)
+		}
+
+		return messageMsg{title: "Success", content: fmt.Sprintf("Moved %d files to %s.", count, dest)}
+	}
 }
 
 func (m mainModel) View() string {
@@ -508,41 +850,26 @@ func (m mainModel) View() string {
 	switch m.state {
 	case menuState:
 		content = m.list.View()
+	case indexState:
+		content = m.indexList.View()
 	case scanningState:
 		content = fmt.Sprintf("\n\n  %s Scanning for duplicates...\n\n  Press q to cancel", m.spinner.View())
 	case resultsState:
-		if m.err != nil {
-			content = fmt.Sprintf("\n\n  Error: %v\n\n  Press esc to go back", m.err)
-		} else if len(m.results) == 0 {
-			content = "\n\n  No duplicates found.\n\n  Press esc to go back"
-		} else {
-			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("\n  Found %d duplicate groups:\n\n", len(m.results)))
-			for i, res := range m.results {
-				if i > 15 {
-					sb.WriteString("  ... and more\n")
-					break
-				}
-				sb.WriteString(fmt.Sprintf("  Group %d (Hash: %s...)\n", i+1, res.HashSum[:8]))
-				for _, guid := range res.FileGuids {
-					file := m.app.GetIndex().GetFileByGuid(guid)
-					if file != nil {
-						sb.WriteString(fmt.Sprintf("    - %s (%s)\n", file.Path, file.HumanizedSize))
-					}
-				}
-				sb.WriteString("\n")
-			}
-			sb.WriteString("\n  Press esc to go back")
-			content = sb.String()
-		}
+		content = m.resultsView()
 	case filesState:
 		content = m.filesList.View()
 	case addingPathState:
 		content = fmt.Sprintf("\n  Add Path\n\n%s\n\n(esc to cancel, enter to confirm)", m.textInput.View())
+	case removingPathState:
+		content = fmt.Sprintf("\n  Remove Path (matches index path)\n\n%s\n\n(esc to cancel, enter to confirm)", m.textInput.View())
 	case configState:
 		content = m.configList.View()
 	case confirmClearState:
 		content = "\n\n  Are you sure you want to clear the entire index?\n\n  (y)es / (n)o"
+	case filteringState:
+		content = fmt.Sprintf("\n  Filter Duplicates\n\n%s\n\n(esc to cancel, enter to confirm)", m.textInput.View())
+	case movingState:
+		content = fmt.Sprintf("\n  Move Selected Files\n\n%s\n\n(esc to cancel, enter to confirm)", m.textInput.View())
 	case messageState:
 		content = fmt.Sprintf("\n  %s\n\n  %s\n\n  Press esc to go back", m.msgTitle, m.msgContent)
 	}
@@ -556,6 +883,182 @@ func (m mainModel) startScan() tea.Cmd {
 		scanner := core.NewScanner(m.app.GetIndex())
 		results, err := scanner.ScanForDuplicates()
 		return scanFinishedMsg{results: results, err: err}
+	}
+}
+
+func (m mainModel) resultsView() string {
+	if m.err != nil {
+		return fmt.Sprintf("\n\n  Error: %v\n\n  Press esc to go back", m.err)
+	}
+
+	if len(m.results) == 0 {
+		return "\n\n  No duplicates found.\n\n  Press esc to go back"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n  Show Duplicates (Interactive)\n\n")
+
+	// Filtering
+	if m.dupeFilter != "" {
+		sb.WriteString(fmt.Sprintf("  Filter: %s\n", m.dupeFilter))
+	}
+
+	// Get filtered and flattened results for paginator
+	var allItems []resultItem
+	for gIdx, group := range m.results {
+		groupMatch := false
+		var groupItems []resultItem
+
+		for _, guid := range group.FileGuids {
+			file := m.app.GetIndex().GetFileByGuid(guid)
+			if file != nil {
+				if m.dupeFilter == "" || strings.Contains(strings.ToLower(file.Path), strings.ToLower(m.dupeFilter)) {
+					groupMatch = true
+					groupItems = append(groupItems, resultItem{
+						isHeader: false,
+						file:     file,
+						group:    &m.results[gIdx],
+					})
+				}
+			}
+		}
+
+		if groupMatch {
+			allItems = append(allItems, resultItem{
+				isHeader: true,
+				hash:     group.HashSum,
+				group:    &m.results[gIdx],
+			})
+			allItems = append(allItems, groupItems...)
+		}
+	}
+
+	m.paginator.TotalPages = (len(allItems) + m.paginator.PerPage - 1) / m.paginator.PerPage
+	if m.paginator.Page >= m.paginator.TotalPages && m.paginator.TotalPages > 0 {
+		m.paginator.Page = m.paginator.TotalPages - 1
+	}
+
+	start, end := m.paginator.GetSliceBounds(len(allItems))
+	pagedItems := allItems[start:end]
+
+	if len(allItems) == 0 {
+		sb.WriteString("  No files match filter.\n")
+	} else {
+		// Calculate starting group counter for the current page
+		groupCounter := 0
+		if start > 0 {
+			// Count groups before the start of the page
+			var lastG *core.ResultList
+			for i := 0; i < start; i++ {
+				if allItems[i].group != lastG {
+					lastG = allItems[i].group
+					groupCounter++
+				}
+			}
+			// Adjust so that the current group (which may have started before 'start') is counted
+			groupCounter-- // It will be incremented in the loop
+		}
+
+		var lastGroup *core.ResultList
+
+		for i, item := range pagedItems {
+			if item.group != lastGroup {
+				lastGroup = item.group
+				groupCounter++
+			}
+
+			cursor := " "
+			if i == m.dupeCursor {
+				cursor = ">"
+			}
+
+			colorIdx := groupCounter % len(hashColors)
+			style := lipgloss.NewStyle().Foreground(hashColors[colorIdx])
+
+			if item.isHeader {
+				sb.WriteString(fmt.Sprintf(" %s %s\n", cursor, style.Render(fmt.Sprintf("Hash: %s", item.hash))))
+			} else {
+				checked := " "
+				if m.selectedDupes[item.file.Guid] {
+					checked = "x"
+				}
+
+				fileStyle := lipgloss.NewStyle()
+				// Check if it's the "original" (first in group)
+				isOriginal := item.file.Guid == item.group.FileGuids[0]
+				if isOriginal {
+					fileStyle = fileStyle.Bold(true).Foreground(lipgloss.Color("2")) // Green for original
+				} else {
+					fileStyle = fileStyle.Foreground(lipgloss.Color("7")) // Gray/White for dupes
+				}
+
+				sb.WriteString(fmt.Sprintf(" %s   [%s] %s (%s)\n", cursor, checked, fileStyle.Render(item.file.Path), item.file.HumanizedSize))
+			}
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("\n  Page %d of %d (%d items total)\n", m.paginator.Page+1, m.paginator.TotalPages, len(allItems)))
+	sb.WriteString("\n  [↑/↓] navigate • [space] select • [a] auto • [f] filter • [e] export • [m] move • [t] trash • [esc] back\n")
+
+	return sb.String()
+}
+
+func (m mainModel) exportSelected(allFiles []*core.FileItem) tea.Cmd {
+	return func() tea.Msg {
+		var selected []*core.FileItem
+		for _, file := range allFiles {
+			if m.selectedDupes[file.Guid] {
+				selected = append(selected, file)
+			}
+		}
+		if len(selected) == 0 {
+			return messageMsg{title: "Export", content: "No files selected for export."}
+		}
+
+		// Re-use Export functionality but filtered
+		// Actually, App.Export works on ALL dupes.
+		// Let's just create a quick report for the selected ones.
+		timestamp := time.Now().Format("20060102_150405")
+		filename := fmt.Sprintf("dupefiles_selection_%s.txt", timestamp)
+
+		f, err := os.Create(filename)
+		if err != nil {
+			return messageMsg{title: "Error", content: fmt.Sprintf("Failed to create export file: %v", err)}
+		}
+		defer f.Close()
+
+		fmt.Fprintf(f, "# DupeFiles Selection Export - %d files\n", len(selected))
+		for _, file := range selected {
+			fmt.Fprintf(f, "%s (%s)\n", file.Path, file.HumanizedSize)
+		}
+
+		return messageMsg{title: "Success", content: fmt.Sprintf("Exported selection to %s", filename)}
+	}
+}
+
+func (m mainModel) trashSelected(allFiles []*core.FileItem) tea.Cmd {
+	return func() tea.Msg {
+		var selected []*core.FileItem
+		for _, file := range allFiles {
+			if m.selectedDupes[file.Guid] {
+				selected = append(selected, file)
+			}
+		}
+		if len(selected) == 0 {
+			return messageMsg{title: "Trash", content: "No files selected for trash."}
+		}
+
+		count, err := m.app.MoveFilesToTrash(selected)
+		if err != nil {
+			return messageMsg{title: "Error", content: fmt.Sprintf("Error moving to trash: %v", err)}
+		}
+
+		// Clear selection after action
+		for _, file := range selected {
+			delete(m.selectedDupes, file.Guid)
+		}
+
+		return messageMsg{title: "Success", content: fmt.Sprintf("Moved %d files to trash.", count)}
 	}
 }
 
@@ -581,10 +1084,10 @@ func (m mainModel) updateIndex() tea.Cmd {
 
 func (m mainModel) clearIndex() tea.Cmd {
 	return func() tea.Msg {
-		count, err := m.app.GetIndex().Clear()
+		err := m.app.GetIndex().Clear()
 		if err != nil {
 			return messageMsg{title: "Error", content: fmt.Sprintf("Error clearing index: %v", err)}
 		}
-		return messageMsg{title: "Success", content: fmt.Sprintf("Cleared %d files from the database", count)}
+		return messageMsg{title: "Success", content: "Database cleared"}
 	}
 }

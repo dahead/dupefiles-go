@@ -35,6 +35,7 @@ const (
 	editingConfigState
 	filesState
 	addingPathState
+	confirmClearState
 	messageState
 	errorState
 )
@@ -211,6 +212,8 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateConfig(msg)
 	case editingConfigState:
 		return m.updateEditingConfig(msg)
+	case confirmClearState:
+		return m.updateConfirmClear(msg)
 	case messageState:
 		return m.updateSubView(msg)
 	}
@@ -243,7 +246,8 @@ func (m mainModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "update":
 					return m, m.updateIndex()
 				case "clear":
-					return m, m.clearIndex()
+					m.state = confirmClearState
+					return m, nil
 				case "exit":
 					m.quitting = true
 					return m, tea.Quit
@@ -460,10 +464,25 @@ func (m mainModel) updateScanning(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m mainModel) updateConfirmClear(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "y", "Y", "enter":
+			m.state = menuState
+			return m, m.clearIndex()
+		case "n", "N", "esc", "backspace":
+			m.state = menuState
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
 func (m mainModel) updateSubView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "esc" || msg.String() == "backspace" || msg.String() == "q" {
+		if msg.String() == "esc" || msg.String() == "backspace" || msg.String() == "q" || msg.String() == "enter" {
 			m.state = menuState
 			return m, nil
 		}
@@ -522,6 +541,8 @@ func (m mainModel) View() string {
 		content = fmt.Sprintf("\n  Add Path\n\n%s\n\n(esc to cancel, enter to confirm)", m.textInput.View())
 	case configState:
 		content = m.configList.View()
+	case confirmClearState:
+		content = "\n\n  Are you sure you want to clear the entire index?\n\n  (y)es / (n)o"
 	case messageState:
 		content = fmt.Sprintf("\n  %s\n\n  %s\n\n  Press esc to go back", m.msgTitle, m.msgContent)
 	}
@@ -560,9 +581,10 @@ func (m mainModel) updateIndex() tea.Cmd {
 
 func (m mainModel) clearIndex() tea.Cmd {
 	return func() tea.Msg {
-		// core.App.IndexClear() does a lot of things.
-		// Let's just use the index method if possible or call App.IndexClear() but it prints.
-		// For now let's just use a simple message as it might be destructive.
-		return messageMsg{title: "Notice", content: "Clear Index not fully implemented in TUI yet for safety."}
+		count, err := m.app.GetIndex().Clear()
+		if err != nil {
+			return messageMsg{title: "Error", content: fmt.Sprintf("Error clearing index: %v", err)}
+		}
+		return messageMsg{title: "Success", content: fmt.Sprintf("Cleared %d files from the database", count)}
 	}
 }

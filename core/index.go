@@ -247,6 +247,19 @@ func (idx *Index) Close() error {
 }
 
 // Todo: integrate or remove
+func (idx *Index) Clear() error {
+	_, err := idx.db.Exec("DELETE FROM files")
+	if err != nil {
+		return err
+	}
+	_, err = idx.db.Exec("DELETE FROM duplicates")
+	if err != nil {
+		return err
+	}
+	idx.files = make(map[string]*FileItem)
+	return nil
+}
+
 func (idx *Index) AddFile(path string) error {
 	fileInfo, err := os.Stat(path)
 	if err != nil {

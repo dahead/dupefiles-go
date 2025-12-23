@@ -16,7 +16,8 @@ type ResultList struct {
 }
 
 type Scanner struct {
-	idx *Index
+	idx              *Index
+	ProgressCallback func(float64)
 }
 
 func NewScanner(idx *Index) *Scanner {
@@ -27,23 +28,35 @@ func NewScanner(idx *Index) *Scanner {
 func (s *Scanner) ScanBySize() (map[int64][]*FileItem, error) {
 	sizeGroups := make(map[int64][]*FileItem)
 	fmt.Println("Scanning for size equivalent files...")
-	for _, file := range s.idx.files {
+	allFiles := s.idx.GetAllFiles()
+	totalFiles := len(allFiles)
+	for i, file := range allFiles {
 		sizeGroups[file.Size] = append(sizeGroups[file.Size], file)
+		if s.ProgressCallback != nil && i%100 == 0 {
+			s.ProgressCallback(float64(i) / float64(totalFiles) * 0.1)
+		}
 	}
 	return sizeGroups, nil
 }
 
 func (s *Scanner) ScanForDuplicates() ([]ResultList, error) {
+	if s.ProgressCallback != nil {
+		s.ProgressCallback(0)
+	}
 	// Step 1: Group files by size
 	sizeGroups, err := s.ScanBySize()
 	if err != nil {
 		return nil, err
 	}
+	// ScanBySize already ends at 0.1
 
 	// Step 2: Calculate hashes for files in each size group
 	finalHashGroups, err := s.ScanByHash(sizeGroups)
 	if err != nil {
 		return nil, err
+	}
+	if s.ProgressCallback != nil {
+		s.ProgressCallback(0.5)
 	}
 
 	// Step 3: Find actual duplicates by comparing file contents
@@ -55,8 +68,18 @@ func (s *Scanner) ScanForDuplicates() ([]ResultList, error) {
 	resultsChan := make(chan ResultList, len(finalHashGroups))
 	semaphore := make(chan struct{}, runtime.NumCPU()) // Limit concurrent hash groups
 
+	totalGroups := len(finalHashGroups)
+	processedGroups := 0
+	var processedMu sync.Mutex
+
 	for hash, filesInHashGroup := range finalHashGroups {
 		if len(filesInHashGroup) < 2 {
+			processedMu.Lock()
+			processedGroups++
+			if s.ProgressCallback != nil {
+				s.ProgressCallback(0.5 + float64(processedGroups)/float64(totalGroups)*0.5)
+			}
+			processedMu.Unlock()
 			continue
 		}
 
@@ -73,6 +96,13 @@ func (s *Scanner) ScanForDuplicates() ([]ResultList, error) {
 				}
 				resultsChan <- *result
 			}
+
+			processedMu.Lock()
+			processedGroups++
+			if s.ProgressCallback != nil {
+				s.ProgressCallback(0.5 + float64(processedGroups)/float64(totalGroups)*0.5)
+			}
+			processedMu.Unlock()
 		}(hash, filesInHashGroup)
 	}
 
@@ -85,6 +115,10 @@ func (s *Scanner) ScanForDuplicates() ([]ResultList, error) {
 		resultsMu.Lock()
 		results = append(results, result)
 		resultsMu.Unlock()
+	}
+
+	if s.ProgressCallback != nil {
+		s.ProgressCallback(1.0)
 	}
 
 	return results, nil
@@ -110,6 +144,17 @@ func (s *Scanner) calculateHashGroups(sizeGroups map[int64][]*FileItem) (map[str
 	var allHashesToUpdate []struct{ guid, hash string }
 
 	fmt.Println("Scanning for hash equivalent files...")
+
+	// Count total files that need hashing or checking
+	totalFilesToCheck := 0
+	for _, filesInGroup := range sizeGroups {
+		if len(filesInGroup) >= 2 {
+			totalFilesToCheck += len(filesInGroup)
+		}
+	}
+	processedFiles := 0
+	var processedFilesMu sync.Mutex
+
 	totalSizeGroups := len(sizeGroups)
 	processedSizeGroups := 0
 
@@ -131,6 +176,12 @@ func (s *Scanner) calculateHashGroups(sizeGroups map[int64][]*FileItem) (map[str
 				filesToHash = append(filesToHash, file)
 			} else {
 				finalHashGroups[file.Hash.String] = append(finalHashGroups[file.Hash.String], file)
+				processedFilesMu.Lock()
+				processedFiles++
+				if s.ProgressCallback != nil && totalFilesToCheck > 0 {
+					s.ProgressCallback(0.1 + (float64(processedFiles)/float64(totalFilesToCheck))*0.4)
+				}
+				processedFilesMu.Unlock()
 			}
 		}
 
@@ -169,6 +220,13 @@ func (s *Scanner) calculateHashGroups(sizeGroups map[int64][]*FileItem) (map[str
 							calculatedHash, err = CalculateFileHash(jobFile.Path, jobFile.Size)
 						}
 						resultsChan <- hashCalcResult{file: jobFile, hashStr: calculatedHash, err: err}
+
+						processedFilesMu.Lock()
+						processedFiles++
+						if s.ProgressCallback != nil && totalFilesToCheck > 0 {
+							s.ProgressCallback(0.1 + (float64(processedFiles)/float64(totalFilesToCheck))*0.4)
+						}
+						processedFilesMu.Unlock()
 					}
 				}()
 			}

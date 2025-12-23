@@ -41,7 +41,9 @@ func main() {
 
 	// If no flags are provided, or -tui is set, start TUI
 	if flag.NFlag() == 0 || *tuiMode {
-		p := tea.NewProgram(tui.NewModel(app), tea.WithAltScreen())
+		m := tui.NewModel(app)
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		app.SetProgram(p)
 		if _, err := p.Run(); err != nil {
 			fmt.Printf("Alas, there's been an error: %v", err)
 			os.Exit(1)

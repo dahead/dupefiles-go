@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/paginator"
-	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -44,6 +44,19 @@ var (
 				Foreground(lipgloss.Color("#FAFAFA")).
 				Background(lipgloss.Color("#FFAF00")).
 				Padding(0, 1)
+
+	dialogStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#7D56F4")).
+			Padding(1, 3).
+			Align(lipgloss.Center)
+
+	buttonStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#7D56F4")).
+			Padding(0, 3).
+			MarginTop(1).
+			Bold(true)
 
 	statusStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FAFAFA")).
@@ -76,12 +89,36 @@ const (
 	removingPathState
 	confirmClearState
 	messageState
-	errorState
-	dupesState
 	filteringState
 	movingState
 	browsingState
+	loadingState
 )
+
+type menuAction struct {
+	id    string
+	key   string
+	title string
+	desc  string
+}
+
+var mainActions = []menuAction{
+	{id: "scan", key: "1", title: "Start Scan", desc: "Scan for duplicate files"},
+	{id: "index", key: "2", title: "Database (Index)", desc: "Manage indexed files and folders"},
+	{id: "dupes", key: "3", title: "Results", desc: "Show duplicates found in previous scans"},
+	{id: "config", key: "4", title: "Config", desc: "Show current configuration"},
+	{id: "exit", key: "q", title: "Exit", desc: "Quit the application"},
+}
+
+var indexMenuActions = []menuAction{
+	{id: "add_path", key: "1", title: "Add Path (Manual)", desc: "Enter a file or folder path manually"},
+	{id: "browse_path", key: "2", title: "Add Path (Browse)", desc: "Browse for files or folders to add"},
+	{id: "remove_path", key: "3", title: "Remove Path", desc: "Remove a file or folder from the index"},
+	{id: "update", key: "4", title: "Update", desc: "Update file hashes in the database"},
+	{id: "files", key: "5", title: "Show Files", desc: "List all files in the database"},
+	{id: "purge", key: "6", title: "Purge", desc: "Remove non-existing files from database"},
+	{id: "clear", key: "7", title: "Clear", desc: "Clear all files from the database"},
+}
 
 type messageMsg struct {
 	title   string
@@ -131,7 +168,7 @@ type mainModel struct {
 	filesList       list.Model
 	configList      list.Model
 	dupesList       list.Model
-	spinner         spinner.Model
+	progress        progress.Model
 	textInput       textinput.Model
 	paginator       paginator.Model
 	app             *core.App
@@ -144,6 +181,8 @@ type mainModel struct {
 	editingConfigID string
 	msgTitle        string
 	msgContent      string
+	loadingMsg      string
+	loadingPercent  float64
 	quitting        bool
 	width           int
 	height          int
@@ -163,34 +202,34 @@ type browserItem struct {
 
 func customDelegate(color lipgloss.Color) list.DefaultDelegate {
 	d := list.NewDefaultDelegate()
-	d.Styles.SelectedTitle = d.Styles.SelectedTitle.Foreground(color).BorderForeground(color)
-	d.Styles.SelectedDesc = d.Styles.SelectedDesc.Foreground(color).BorderForeground(color)
+	d.Styles.SelectedTitle = d.Styles.SelectedTitle.Foreground(lipgloss.Color("#FAFAFA")).Background(color).Padding(0, 1).Bold(true)
+	d.Styles.SelectedDesc = d.Styles.SelectedDesc.Foreground(lipgloss.Color("#EEEEEE")).Background(color).Padding(0, 1)
 	d.Styles.NormalTitle = d.Styles.NormalTitle.Foreground(color)
 	return d
 }
 
 func NewModel(app *core.App) mainModel {
-	items := []list.Item{
-		item{title: "[1] Start Scan", desc: "Scan for duplicate files", id: "scan"},
-		item{title: "[2] Database (Index)", desc: "Manage indexed files and folders", id: "index"},
-		item{title: "[3] Results", desc: "Show duplicates found in previous scans", id: "dupes"},
-		item{title: "[4] Config", desc: "Show current configuration", id: "config"},
-		item{title: "[Q] Exit", desc: "Quit the application", id: "exit"},
+	mainItems := make([]list.Item, len(mainActions))
+	for i, action := range mainActions {
+		mainItems[i] = item{
+			title: fmt.Sprintf("[%s] %s", strings.ToUpper(action.key), action.title),
+			desc:  action.desc,
+			id:    action.id,
+		}
 	}
 
-	l := list.New(items, customDelegate(lipgloss.Color("#7D56F4")), 0, 0)
+	l := list.New(mainItems, customDelegate(lipgloss.Color("#7D56F4")), 0, 0)
 	l.Title = "DupeFiles TUI"
 	l.Styles.Title = titleStyle
 	l.SetShowStatusBar(false)
 
-	indexItems := []list.Item{
-		item{title: "[1] Add Path (Manual)", desc: "Enter a file or folder path manually", id: "add_path"},
-		item{title: "[B] Add Path (Browse)", desc: "Browse for files or folders to add", id: "browse_path"},
-		item{title: "[2] Remove Path", desc: "Remove a file or folder from the index", id: "remove_path"},
-		item{title: "[3] Show Indexed Files", desc: "List all files in the database", id: "files"},
-		item{title: "[4] Purge Index", desc: "Remove non-existing files from database", id: "purge"},
-		item{title: "[5] Update Index", desc: "Update file hashes in the database", id: "update"},
-		item{title: "[6] Clear Index", desc: "Clear all files from the database", id: "clear"},
+	indexItems := make([]list.Item, len(indexMenuActions))
+	for i, action := range indexMenuActions {
+		indexItems[i] = item{
+			title: fmt.Sprintf("[%s] %s", action.key, action.title),
+			desc:  action.desc,
+			id:    action.id,
+		}
 	}
 	il := list.New(indexItems, customDelegate(lipgloss.Color("#00AF5F")), 0, 0)
 	il.Title = "Database (Index) Management"
@@ -219,12 +258,10 @@ func NewModel(app *core.App) mainModel {
 	cl.Styles.Title = orangeTitleStyle
 	cl.SetShowStatusBar(false)
 
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-
 	ti := textinput.New()
 	ti.Placeholder = "Enter path to add..."
+
+	p := progress.New(progress.WithDefaultGradient())
 
 	pg := paginator.New()
 	pg.Type = paginator.Dots
@@ -236,7 +273,7 @@ func NewModel(app *core.App) mainModel {
 		indexList:       il,
 		filesList:       fl,
 		configList:      cl,
-		spinner:         s,
+		progress:        p,
 		textInput:       ti,
 		paginator:       pg,
 		app:             app,
@@ -246,7 +283,15 @@ func NewModel(app *core.App) mainModel {
 }
 
 func (m mainModel) Init() tea.Cmd {
-	return nil
+	return tickProgress()
+}
+
+type tickProgressMsg struct{}
+
+func tickProgress() tea.Cmd {
+	return tea.Tick(time.Millisecond*50, func(t time.Time) tea.Msg {
+		return tickProgressMsg{}
+	})
 }
 
 type scanFinishedMsg struct {
@@ -274,16 +319,41 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.indexList.SetSize(msg.Width, msg.Height-4)
 		m.filesList.SetSize(msg.Width, msg.Height-4)
 		m.configList.SetSize(msg.Width, msg.Height-4)
+		m.progress.Width = msg.Width - 10
 		m.paginator.PerPage = (m.height - 12) / 4
 		if m.paginator.PerPage < 1 {
 			m.paginator.PerPage = 1
 		}
 		return m, nil
 
+	case tickProgressMsg:
+		if m.state == loadingState {
+			m.loadingPercent += 0.05
+			if m.loadingPercent > 1.0 {
+				m.loadingPercent = 0
+			}
+			return m, tea.Batch(m.progress.SetPercent(m.loadingPercent), tickProgress())
+		}
+		return m, tickProgress()
+
+	case scanProgressMsg:
+		m.loadingPercent = float64(msg)
+		cmd := m.progress.SetPercent(float64(msg))
+		return m, cmd
+
+	case progress.FrameMsg:
+		newProgressModel, cmd := m.progress.Update(msg)
+		if newProgressModel, ok := newProgressModel.(progress.Model); ok {
+			m.progress = newProgressModel
+		}
+		return m, cmd
+
 	case scanFinishedMsg:
 		m.state = resultsState
 		m.results = msg.results
 		m.err = msg.err
+		m.paginator.Page = 0
+		m.dupeCursor = 0
 		// Auto select: keep first, select others
 		for _, group := range m.results {
 			for i, guid := range group.FileGuids {
@@ -313,11 +383,6 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case configLoadedMsg:
 		m.configList.SetItems(msg.items)
 		return m, nil
-
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
 	}
 
 	switch m.state {
@@ -347,6 +412,8 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateMoving(msg)
 	case browsingState:
 		return m.updateBrowsing(msg)
+	case loadingState:
+		return m, nil
 	case messageState:
 		return m.updateSubView(msg)
 	}
@@ -357,66 +424,18 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m mainModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "1":
-			m.state = scanningState
-			return m, tea.Batch(m.startScan(), m.spinner.Tick)
-		case "2":
-			m.state = indexState
-			return m, nil
-		case "3":
-			m.state = resultsState
-			m.results = m.getDupes()
-			// Auto select: keep first, select others
-			for _, group := range m.results {
-				for i, guid := range group.FileGuids {
-					if i == 0 {
-						m.selectedDupes[guid] = false
-					} else {
-						m.selectedDupes[guid] = true
-					}
-				}
-			}
-			return m, nil
-		case "4":
-			m.state = configState
-			return m, m.refreshConfig()
-		case "q":
-			m.quitting = true
-			return m, tea.Quit
+		keyStr := msg.String()
+		switch keyStr {
 		case "enter":
 			i, ok := m.list.SelectedItem().(item)
 			if ok {
-				switch i.id {
-				case "scan":
-					m.state = scanningState
-					return m, tea.Batch(m.startScan(), m.spinner.Tick)
-				case "index":
-					m.state = indexState
-					return m, nil
-				case "dupes":
-					m.state = resultsState
-					m.results = m.getDupes()
-					m.paginator.Page = 0
-					m.dupeCursor = 0
-					// Auto select: keep first, select others
-					for _, group := range m.results {
-						for i, guid := range group.FileGuids {
-							if i == 0 {
-								m.selectedDupes[guid] = false
-							} else {
-								m.selectedDupes[guid] = true
-							}
-						}
-					}
-					return m, nil
-				case "config":
-					m.state = configState
-					return m, m.refreshConfig()
-				case "exit":
-					m.quitting = true
-					return m, tea.Quit
-				}
+				return m.handleMainAction(i.id)
+			}
+		}
+
+		for _, action := range mainActions {
+			if keyStr == action.key || (len(keyStr) == 1 && strings.ToUpper(keyStr) == strings.ToUpper(action.key)) {
+				return m.handleMainAction(action.id)
 			}
 		}
 	}
@@ -426,72 +445,50 @@ func (m mainModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m mainModel) handleMainAction(id string) (tea.Model, tea.Cmd) {
+	switch id {
+	case "scan":
+		m.state = scanningState
+		return m, tea.Batch(m.startScan(), m.progress.SetPercent(0))
+	case "index":
+		m.state = indexState
+		return m, nil
+	case "dupes":
+		m.state = loadingState
+		m.loadingPercent = 0
+		m.loadingMsg = "Searching for duplicates..."
+		return m, func() tea.Msg {
+			results := m.getDupes()
+			return scanFinishedMsg{results: results, err: nil}
+		}
+	case "config":
+		m.state = configState
+		return m, m.refreshConfig()
+	case "exit":
+		m.quitting = true
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
 func (m mainModel) updateIndexMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
+		keyStr := msg.String()
+		switch keyStr {
 		case "esc", "backspace":
 			m.state = menuState
-			return m, nil
-		case "1":
-			m.state = addingPathState
-			m.textInput.Placeholder = "Enter path to add..."
-			m.textInput.Focus()
-			m.textInput.SetValue("")
-			return m, nil
-		case "b", "B":
-			m.state = browsingState
-			dir, _ := os.Getwd()
-			m.browserDir = dir
-			return m, m.loadDir(dir)
-		case "2":
-			m.state = removingPathState
-			m.textInput.Placeholder = "Enter text to match for removal..."
-			m.textInput.Focus()
-			m.textInput.SetValue("")
-			return m, nil
-		case "3":
-			m.state = filesState
-			return m, m.refreshFiles()
-		case "4":
-			return m, m.purgeIndex()
-		case "5":
-			return m, m.updateIndex()
-		case "6":
-			m.state = confirmClearState
 			return m, nil
 		case "enter":
 			i, ok := m.indexList.SelectedItem().(item)
 			if ok {
-				switch i.id {
-				case "add_path":
-					m.state = addingPathState
-					m.textInput.Placeholder = "Enter path to add..."
-					m.textInput.Focus()
-					m.textInput.SetValue("")
-					return m, nil
-				case "browse_path":
-					m.state = browsingState
-					dir, _ := os.Getwd()
-					m.browserDir = dir
-					return m, m.loadDir(dir)
-				case "remove_path":
-					m.state = removingPathState
-					m.textInput.Placeholder = "Enter text to match for removal..."
-					m.textInput.Focus()
-					m.textInput.SetValue("")
-					return m, nil
-				case "files":
-					m.state = filesState
-					return m, m.refreshFiles()
-				case "purge":
-					return m, m.purgeIndex()
-				case "update":
-					return m, m.updateIndex()
-				case "clear":
-					m.state = confirmClearState
-					return m, nil
-				}
+				return m.handleIndexAction(i.id)
+			}
+		}
+
+		for _, action := range indexMenuActions {
+			if keyStr == action.key || (len(keyStr) == 1 && strings.ToUpper(keyStr) == strings.ToUpper(action.key)) {
+				return m.handleIndexAction(action.id)
 			}
 		}
 	}
@@ -499,6 +496,47 @@ func (m mainModel) updateIndexMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.indexList, cmd = m.indexList.Update(msg)
 	return m, cmd
+}
+
+func (m mainModel) handleIndexAction(id string) (tea.Model, tea.Cmd) {
+	switch id {
+	case "add_path":
+		m.state = addingPathState
+		m.textInput.Placeholder = "Enter path to add..."
+		m.textInput.Focus()
+		m.textInput.SetValue("")
+		return m, nil
+	case "browse_path":
+		m.state = browsingState
+		dir, _ := os.Getwd()
+		m.browserDir = dir
+		return m, m.loadDir(dir)
+	case "remove_path":
+		m.state = removingPathState
+		m.textInput.Placeholder = "Enter text to match for removal..."
+		m.textInput.Focus()
+		m.textInput.SetValue("")
+		return m, nil
+	case "files":
+		m.state = loadingState
+		m.loadingPercent = 0
+		m.loadingMsg = "Loading files..."
+		return m, m.refreshFiles()
+	case "purge":
+		m.state = loadingState
+		m.loadingPercent = 0
+		m.loadingMsg = "Purging index..."
+		return m, m.purgeIndex()
+	case "update":
+		m.state = loadingState
+		m.loadingPercent = 0
+		m.loadingMsg = "Updating index..."
+		return m, m.updateIndex()
+	case "clear":
+		m.state = confirmClearState
+		return m, nil
+	}
+	return m, nil
 }
 
 func (m mainModel) updateFiles(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -516,6 +554,9 @@ func (m mainModel) updateFiles(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "x", "delete":
 			i, ok := m.filesList.SelectedItem().(fileItem)
 			if ok {
+				m.state = loadingState
+				m.loadingPercent = 0
+				m.loadingMsg = "Removing path..."
 				return m, m.removePath(i.path)
 			}
 		}
@@ -536,7 +577,9 @@ func (m mainModel) updateAddingPath(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			path := m.textInput.Value()
 			if path != "" {
-				m.state = indexState
+				m.state = loadingState
+				m.loadingPercent = 0
+				m.loadingMsg = "Adding path..."
 				return m, m.addPath(path)
 			}
 			m.state = indexState
@@ -582,6 +625,9 @@ func (m mainModel) updateBrowsing(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.loadDir(m.browserDir)
 			}
 		case "a":
+			m.state = loadingState
+			m.loadingPercent = 0
+			m.loadingMsg = "Adding selected paths..."
 			return m, m.addSelectedPaths()
 		}
 	case dirLoadedMsg:
@@ -678,7 +724,9 @@ func (m mainModel) updateRemovingPath(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			path := m.textInput.Value()
 			if path != "" {
-				m.state = indexState
+				m.state = loadingState
+				m.loadingPercent = 0
+				m.loadingMsg = "Removing path..."
 				return m, m.removePath(path)
 			}
 			m.state = indexState
@@ -706,8 +754,6 @@ func (m mainModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = editingConfigState
 			m.editingConfigID = "minfilesize"
 			m.textInput.Focus()
-			// Need current value... this is tricky without finding it in list
-			// But we can just set it to empty or try to get it from app
 			c := m.app.GetConfig()
 			m.textInput.SetValue(fmt.Sprintf("%d", c.MinFileSize))
 			return m, nil
@@ -864,7 +910,9 @@ func (m mainModel) updateConfirmClear(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "y", "Y", "enter":
-			m.state = menuState
+			m.state = loadingState
+			m.loadingPercent = 0
+			m.loadingMsg = "Clearing index..."
 			return m, m.clearIndex()
 		case "n", "N", "esc", "backspace":
 			m.state = menuState
@@ -880,7 +928,7 @@ func (m mainModel) updateSubView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == resultsState {
 			return m.updateResults(msg)
 		}
-		if msg.String() == "esc" || msg.String() == "backspace" || msg.String() == "q" {
+		if msg.String() == "esc" || msg.String() == "backspace" || msg.String() == "q" || msg.String() == "enter" {
 			if m.state == indexState {
 				m.state = menuState
 			} else if m.state == messageState {
@@ -1078,10 +1126,19 @@ func (m mainModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "t":
+		m.state = loadingState
+		m.loadingPercent = 0
+		m.loadingMsg = "Moving selected files to trash..."
 		return m, m.trashSelected(allFiles)
 	case "d":
+		m.state = loadingState
+		m.loadingPercent = 0
+		m.loadingMsg = "Deleting selected files..."
 		return m, m.deleteSelected(allFiles)
 	case "e":
+		m.state = loadingState
+		m.loadingPercent = 0
+		m.loadingMsg = "Exporting selected files..."
 		return m, m.exportSelected(allFiles)
 	case "m":
 		m.state = movingState
@@ -1130,7 +1187,9 @@ func (m mainModel) updateMoving(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			dest := m.textInput.Value()
 			if dest != "" {
-				m.state = resultsState
+				m.state = loadingState
+				m.loadingPercent = 0
+				m.loadingMsg = "Moving selected files..."
 				return m, m.moveSelected(dest)
 			}
 			m.state = resultsState
@@ -1256,8 +1315,19 @@ func (m mainModel) browsingView() string {
 		s += fmt.Sprintf("\n ... (%d more) ...\n", len(m.browserFiles)-maxItems)
 	}
 
-	s += "\n (space) select • (enter) navigate • (a) add selected • (esc) back"
+	s += "\n (space) select • (enter) navigate • (a) add selected • (esc/enter) back"
 	return s
+}
+
+func (m mainModel) dialogView() string {
+	title := titleStyle.Render(m.msgTitle)
+	content := m.msgContent
+	button := buttonStyle.Render(" OK ")
+
+	ui := lipgloss.JoinVertical(lipgloss.Center, title, "", content, button)
+	dialog := dialogStyle.Render(ui)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func (m mainModel) View() string {
@@ -1272,7 +1342,7 @@ func (m mainModel) View() string {
 	case indexState:
 		content = m.indexList.View()
 	case scanningState:
-		content = fmt.Sprintf("\n  %s\n\n  %s Scanning for duplicates...\n\n  Press q to cancel", pinkTitleStyle.Render(" Scanning "), m.spinner.View())
+		content = fmt.Sprintf("\n  %s\n\n  %s\n\n  %s\n\n  Press q to cancel", pinkTitleStyle.Render(" Scanning "), "Searching for duplicates...", m.progress.View())
 	case resultsState:
 		content = m.resultsView()
 	case filesState:
@@ -1293,17 +1363,25 @@ func (m mainModel) View() string {
 		content = m.browsingView()
 	case editingConfigState:
 		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", orangeTitleStyle.Render(" Edit Config "), m.textInput.View())
+	case loadingState:
+		loadingContent := fmt.Sprintf("\n\n   %s\n\n   %s\n\n", m.loadingMsg, m.progress.View())
+		content = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, loadingContent)
 	case messageState:
-		content = fmt.Sprintf("\n  %s\n\n  %s\n\n  Press esc to go back", m.msgTitle, m.msgContent)
+		return m.dialogView()
 	}
 
 	// Simple vertical join with some padding
 	return content
 }
 
+type scanProgressMsg float64
+
 func (m mainModel) startScan() tea.Cmd {
 	return func() tea.Msg {
 		scanner := core.NewScanner(m.app.GetIndex())
+		scanner.ProgressCallback = func(p float64) {
+			m.app.SendUpdate(scanProgressMsg(p))
+		}
 		results, err := scanner.ScanForDuplicates()
 		return scanFinishedMsg{results: results, err: err}
 	}
@@ -1311,11 +1389,15 @@ func (m mainModel) startScan() tea.Cmd {
 
 func (m mainModel) resultsView() string {
 	if m.err != nil {
-		return fmt.Sprintf("\n\n  Error: %v\n\n  Press esc to go back", m.err)
+		m.msgTitle = "Error"
+		m.msgContent = fmt.Sprintf("Error: %v", m.err)
+		return m.dialogView()
 	}
 
 	if len(m.results) == 0 {
-		return "\n\n  No duplicates found.\n\n  Press esc to go back"
+		m.msgTitle = "Results"
+		m.msgContent = "No duplicates found."
+		return m.dialogView()
 	}
 
 	var sb strings.Builder

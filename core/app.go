@@ -7,11 +7,26 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type App struct {
-	index  *Index
-	config *Config
+	index   *Index
+	config  *Config
+	Program interface {
+		Send(msg tea.Msg)
+	}
+}
+
+func (a *App) SetProgram(p interface{ Send(msg tea.Msg) }) {
+	a.Program = p
+}
+
+func (a *App) SendUpdate(msg tea.Msg) {
+	if a.Program != nil {
+		a.Program.Send(msg)
+	}
 }
 
 func NewApp() *App {

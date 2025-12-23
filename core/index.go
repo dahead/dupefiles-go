@@ -440,9 +440,18 @@ func (idx *Index) AddFileItems(fileItems []*FileItem) error {
 	return tx.Commit()
 }
 
+func (idx *Index) RemoveFile(guid string) error {
+	delete(idx.files, guid)
+	_, err := idx.db.Exec("DELETE FROM files WHERE guid = ?", guid)
+	return err
+}
+
 func (idx *Index) Purge() (int, error) {
 	count := 0
 	guidsToDelete := []string{}
+
+	// Create a copy of guids to iterate over safely while potentially deleting from map
+	// though we collect them first anyway.
 	for guid, file := range idx.files {
 		_, err := os.Stat(file.Path)
 		if os.IsNotExist(err) {
@@ -454,26 +463,43 @@ func (idx *Index) Purge() (int, error) {
 		return 0, nil
 	}
 
+	// Begin transaction
 	tx, err := idx.db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin transaction for purge: %v", err)
 	}
-	defer tx.Rollback() // Rollback if not committed
+	defer tx.Rollback()
 
-	stmt, err := tx.Prepare("DELETE FROM files WHERE guid = ?")
+	// Prepare statements
+	stmtFiles, err := tx.Prepare("DELETE FROM files WHERE guid = ?")
 	if err != nil {
-		return 0, fmt.Errorf("failed to prepare delete statement for purge: %v", err)
+		return 0, fmt.Errorf("failed to prepare delete statement for files: %v", err)
 	}
-	defer stmt.Close()
+	defer stmtFiles.Close()
+
+	stmtDupes, err := tx.Prepare("DELETE FROM duplicates WHERE guid = ?")
+	if err != nil {
+		return 0, fmt.Errorf("failed to prepare delete statement for duplicates: %v", err)
+	}
+	defer stmtDupes.Close()
 
 	for _, guid := range guidsToDelete {
-		delete(idx.files, guid) // Remove from in-memory map
-		_, errExec := stmt.Exec(guid)
+		// 1. Remove from database files table
+		_, errExec := stmtFiles.Exec(guid)
 		if errExec != nil {
-			// Log error and continue, or return immediately depending on desired atomicity
-			fmt.Fprintf(os.Stderr, "Error deleting file %s from database during purge: %v\n", guid, errExec)
-			continue // Or return count, errExec
+			fmt.Fprintf(os.Stderr, "Error deleting file %s from files table: %v\n", guid, errExec)
+			continue
 		}
+
+		// 2. Remove from database duplicates table
+		_, errExec = stmtDupes.Exec(guid)
+		if errExec != nil {
+			fmt.Fprintf(os.Stderr, "Error deleting file %s from duplicates table: %v\n", guid, errExec)
+			// Continue even if this fails
+		}
+
+		// 3. Remove from in-memory index
+		delete(idx.files, guid)
 		count++
 	}
 
@@ -481,6 +507,7 @@ func (idx *Index) Purge() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to commit transaction for purge: %v", err)
 	}
+
 	return count, nil
 }
 

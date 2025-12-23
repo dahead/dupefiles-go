@@ -329,13 +329,24 @@ func (a *App) MoveFilesToDirectory(files []*FileItem, path string) (int, error) 
 
 		if a.config.DryRun {
 			fmt.Printf("Would move %s to %s\n", file.Path, destPath)
+			movedCount++
 			continue
 		}
 
 		err := os.Rename(file.Path, destPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error moving %s: %v\n", file.Path, err)
-			continue
+			// Try copy and delete if Rename fails (e.g. cross-device)
+			input, errRead := os.ReadFile(file.Path)
+			if errRead != nil {
+				fmt.Fprintf(os.Stderr, "Error moving %s: %v\n", file.Path, err)
+				continue
+			}
+			errWrite := os.WriteFile(destPath, input, 0644)
+			if errWrite != nil {
+				fmt.Fprintf(os.Stderr, "Error moving %s: %v\n", file.Path, errWrite)
+				continue
+			}
+			os.Remove(file.Path)
 		}
 
 		// Update the file path in the database
@@ -362,6 +373,31 @@ func (a *App) MoveFilesToDirectory(files []*FileItem, path string) (int, error) 
 	return movedCount, nil
 }
 
+func (a *App) DeleteFiles(files []*FileItem) (int, error) {
+	deletedCount := 0
+	for _, file := range files {
+		if a.config.DryRun {
+			fmt.Printf("Would delete %s\n", file.Path)
+			deletedCount++
+			continue
+		}
+
+		err := os.Remove(file.Path)
+		if err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Error deleting %s: %v\n", file.Path, err)
+			continue
+		}
+
+		err = a.index.RemoveFile(file.Guid)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error removing %s from index: %v\n", file.Path, err)
+		}
+
+		deletedCount++
+	}
+	return deletedCount, nil
+}
+
 func (a *App) MoveFilesToTrash(files []*FileItem) (int, error) {
 	trashpath := GetTrashPath()
 	return a.MoveFilesToDirectory(files, trashpath)
@@ -386,59 +422,7 @@ func (a *App) MoveDuplicateFilesToDirectory(path string) {
 
 	// move files to directory - only duplicates, keeping the first file of each size+hash group
 	files := a.index.GetRestOfDuplicates()
-	movedCount := 0
-
-	for _, file := range files {
-		// Get the base filename from the original path
-		baseFileName := filepath.Base(file.Path)
-		// Create the destination path by joining the target directory with the filename
-		destPath := filepath.Join(path, baseFileName)
-
-		// Check if destination file already exists
-		if _, err := os.Stat(destPath); err == nil {
-			// File exists, create a unique name
-			ext := filepath.Ext(baseFileName)
-			name := baseFileName[:len(baseFileName)-len(ext)]
-			destPath = filepath.Join(path, fmt.Sprintf("%s_%d%s", name, time.Now().UnixNano(), ext))
-		}
-
-		if a.config.DryRun {
-			fmt.Printf("Would move %s to %s\n", file.Path, destPath)
-		}
-
-		if !a.config.DryRun {
-
-			// Todo: invalid cross-device link
-
-			err = os.Rename(file.Path, destPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error moving %s: %v\n", file.Path, err)
-				continue
-			}
-
-			// Update the file path in the database
-			oldGuid := file.Guid
-			file.Path = destPath
-			file.Guid = filepath.Clean(destPath)
-
-			// Update the database
-			_, err = a.index.db.Exec(
-				"UPDATE files SET path = ?, guid = ? WHERE guid = ?",
-				file.Path, file.Guid, oldGuid,
-			)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error updating database for %s: %v\n", file.Path, err)
-			}
-
-			// Update the in-memory index
-			delete(a.index.files, oldGuid)
-			a.index.files[file.Guid] = file
-
-			movedCount++
-
-		}
-
-	}
+	movedCount, _ := a.MoveFilesToDirectory(files, path)
 
 	fmt.Printf("Moved %d duplicate files to %s\n", movedCount, path)
 }

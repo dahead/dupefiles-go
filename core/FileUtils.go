@@ -95,6 +95,9 @@ func CompareFilesBinary(path1, path2 string) (bool, error) {
 }
 
 func compareFilesBinarySampleSize(filePathA, filePathB string, sampleSize int) (bool, error) {
+	if sampleSize <= 0 {
+		return CompareFilesBinary(filePathA, filePathB)
+	}
 
 	// Open both files
 	fileA, err := os.Open(filePathA)

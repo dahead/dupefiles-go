@@ -103,7 +103,9 @@ func (s *Scanner) ScanByHash(sizeGroups map[int64][]*FileItem) (map[string][]*Fi
 	return hashGroups, nil
 }
 
-func (s *Scanner) calculateHashGroups(sizeGroups map[int64][]*FileItem) (map[string][]*FileItem, []struct{ guid, hash string }, error) {
+func (s *Scanner) calculateHashGroups(sizeGroups map[int64][]*FileItem) (map[string][]*FileItem, []struct {
+	guid, hash string
+}, error) {
 	finalHashGroups := make(map[string][]*FileItem)
 	var allHashesToUpdate []struct{ guid, hash string }
 

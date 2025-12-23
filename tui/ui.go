@@ -22,6 +22,27 @@ var (
 			Foreground(lipgloss.Color("#FAFAFA")).
 			Background(lipgloss.Color("#7D56F4")).
 			Padding(0, 1)
+
+	pinkTitleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#FF5FD7")).
+			Padding(0, 1)
+
+	greenTitleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#00AF5F")).
+			Padding(0, 1)
+
+	blueTitleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#005FDF")).
+			Padding(0, 1)
+
+	orangeTitleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FAFAFA")).
+				Background(lipgloss.Color("#FFAF00")).
+				Padding(0, 1)
+
 	statusStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FAFAFA")).
 			Background(lipgloss.Color("#3C3C3C")).
@@ -62,6 +83,7 @@ const (
 type messageMsg struct {
 	title   string
 	content string
+	results []core.ResultList
 }
 
 type item struct {
@@ -124,34 +146,45 @@ type mainModel struct {
 	height          int
 }
 
+func customDelegate(color lipgloss.Color) list.DefaultDelegate {
+	d := list.NewDefaultDelegate()
+	d.Styles.SelectedTitle = d.Styles.SelectedTitle.Foreground(color).BorderForeground(color)
+	d.Styles.SelectedDesc = d.Styles.SelectedDesc.Foreground(color).BorderForeground(color)
+	d.Styles.NormalTitle = d.Styles.NormalTitle.Foreground(color)
+	return d
+}
+
 func NewModel(app *core.App) mainModel {
 	items := []list.Item{
-		item{title: "Start Scan", desc: "Scan for duplicate files", id: "scan"},
-		item{title: "Database (Index)", desc: "Manage indexed files and folders", id: "index"},
-		item{title: "Show Duplicates", desc: "Show duplicates found in previous scans", id: "dupes"},
-		item{title: "Config", desc: "Show current configuration", id: "config"},
-		item{title: "Exit", desc: "Quit the application", id: "exit"},
+		item{title: "[1] Start Scan", desc: "Scan for duplicate files", id: "scan"},
+		item{title: "[2] Database (Index)", desc: "Manage indexed files and folders", id: "index"},
+		item{title: "[3] Results", desc: "Show duplicates found in previous scans", id: "dupes"},
+		item{title: "[4] Config", desc: "Show current configuration", id: "config"},
+		item{title: "[Q] Exit", desc: "Quit the application", id: "exit"},
 	}
 
-	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	l := list.New(items, customDelegate(lipgloss.Color("#7D56F4")), 0, 0)
 	l.Title = "DupeFiles TUI"
 	l.Styles.Title = titleStyle
+	l.SetShowStatusBar(false)
 
 	indexItems := []list.Item{
-		item{title: "Add Path", desc: "Add a file or folder to the index", id: "add_path"},
-		item{title: "Remove Path", desc: "Remove a file or folder from the index", id: "remove_path"},
-		item{title: "Show Indexed Files", desc: "List all files in the database", id: "files"},
-		item{title: "Purge Index", desc: "Remove non-existing files from database", id: "purge"},
-		item{title: "Update Index", desc: "Update file hashes in the database", id: "update"},
-		item{title: "Clear Index", desc: "Clear all files from the database", id: "clear"},
+		item{title: "[1] Add Path", desc: "Add a file or folder to the index", id: "add_path"},
+		item{title: "[2] Remove Path", desc: "Remove a file or folder from the index", id: "remove_path"},
+		item{title: "[3] Show Indexed Files", desc: "List all files in the database", id: "files"},
+		item{title: "[4] Purge Index", desc: "Remove non-existing files from database", id: "purge"},
+		item{title: "[5] Update Index", desc: "Update file hashes in the database", id: "update"},
+		item{title: "[6] Clear Index", desc: "Clear all files from the database", id: "clear"},
 	}
-	il := list.New(indexItems, list.NewDefaultDelegate(), 0, 0)
+	il := list.New(indexItems, customDelegate(lipgloss.Color("#00AF5F")), 0, 0)
 	il.Title = "Database (Index) Management"
-	il.Styles.Title = titleStyle
+	il.Styles.Title = greenTitleStyle
+	il.SetShowStatusBar(false)
 
-	fl := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	fl := list.New([]list.Item{}, customDelegate(lipgloss.Color("#00AF5F")), 0, 0)
 	fl.Title = "Indexed Files"
-	fl.Styles.Title = titleStyle
+	fl.Styles.Title = greenTitleStyle
+	fl.SetShowStatusBar(false)
 	fl.AdditionalFullHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			key.NewBinding(
@@ -165,9 +198,10 @@ func NewModel(app *core.App) mainModel {
 		}
 	}
 
-	cl := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	cl := list.New([]list.Item{}, customDelegate(lipgloss.Color("#FFAF00")), 0, 0)
 	cl.Title = "Configuration"
-	cl.Styles.Title = titleStyle
+	cl.Styles.Title = orangeTitleStyle
+	cl.SetShowStatusBar(false)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -223,6 +257,10 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.indexList.SetSize(msg.Width, msg.Height-4)
 		m.filesList.SetSize(msg.Width, msg.Height-4)
 		m.configList.SetSize(msg.Width, msg.Height-4)
+		m.paginator.PerPage = (m.height - 12) / 4
+		if m.paginator.PerPage < 1 {
+			m.paginator.PerPage = 1
+		}
 		return m, nil
 
 	case scanFinishedMsg:
@@ -245,6 +283,9 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = messageState
 		m.msgTitle = msg.title
 		m.msgContent = msg.content
+		if msg.results != nil {
+			m.results = msg.results
+		}
 		return m, nil
 
 	case filesLoadedMsg:
@@ -296,7 +337,34 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m mainModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "enter" {
+		switch msg.String() {
+		case "1":
+			m.state = scanningState
+			return m, tea.Batch(m.startScan(), m.spinner.Tick)
+		case "2":
+			m.state = indexState
+			return m, nil
+		case "3":
+			m.state = resultsState
+			m.results = m.getDupes()
+			// Auto select: keep first, select others
+			for _, group := range m.results {
+				for i, guid := range group.FileGuids {
+					if i == 0 {
+						m.selectedDupes[guid] = false
+					} else {
+						m.selectedDupes[guid] = true
+					}
+				}
+			}
+			return m, nil
+		case "4":
+			m.state = configState
+			return m, m.refreshConfig()
+		case "q":
+			m.quitting = true
+			return m, tea.Quit
+		case "enter":
 			i, ok := m.list.SelectedItem().(item)
 			if ok {
 				switch i.id {
@@ -309,6 +377,8 @@ func (m mainModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "dupes":
 					m.state = resultsState
 					m.results = m.getDupes()
+					m.paginator.Page = 0
+					m.dupeCursor = 0
 					// Auto select: keep first, select others
 					for _, group := range m.results {
 						for i, guid := range group.FileGuids {
@@ -342,6 +412,28 @@ func (m mainModel) updateIndexMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "backspace":
 			m.state = menuState
+			return m, nil
+		case "1":
+			m.state = addingPathState
+			m.textInput.Placeholder = "Enter path to add..."
+			m.textInput.Focus()
+			m.textInput.SetValue("")
+			return m, nil
+		case "2":
+			m.state = removingPathState
+			m.textInput.Placeholder = "Enter text to match for removal..."
+			m.textInput.Focus()
+			m.textInput.SetValue("")
+			return m, nil
+		case "3":
+			m.state = filesState
+			return m, m.refreshFiles()
+		case "4":
+			return m, m.purgeIndex()
+		case "5":
+			return m, m.updateIndex()
+		case "6":
+			m.state = confirmClearState
 			return m, nil
 		case "enter":
 			i, ok := m.indexList.SelectedItem().(item)
@@ -457,6 +549,26 @@ func (m mainModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc", "backspace":
 			m.state = menuState
 			return m, nil
+		case "1":
+			return m, m.toggleConfig("debug")
+		case "2":
+			return m, m.toggleConfig("dryrun")
+		case "3":
+			m.state = editingConfigState
+			m.editingConfigID = "minfilesize"
+			m.textInput.Focus()
+			// Need current value... this is tricky without finding it in list
+			// But we can just set it to empty or try to get it from app
+			c := m.app.GetConfig()
+			m.textInput.SetValue(fmt.Sprintf("%d", c.MinFileSize))
+			return m, nil
+		case "4":
+			m.state = editingConfigState
+			m.editingConfigID = "samplesize"
+			m.textInput.Focus()
+			c := m.app.GetConfig()
+			m.textInput.SetValue(fmt.Sprintf("%d", c.SampleSizeBinaryCompare))
+			return m, nil
 		case "enter", " ":
 			i, ok := m.configList.SelectedItem().(configItem)
 			if ok {
@@ -533,10 +645,10 @@ func (m mainModel) refreshConfig() tea.Cmd {
 	return func() tea.Msg {
 		c := m.app.GetConfig()
 		items := []list.Item{
-			configItem{key: "Debug", value: fmt.Sprintf("%v", c.Debug), id: "debug"},
-			configItem{key: "DryRun", value: fmt.Sprintf("%v", c.DryRun), id: "dryrun"},
-			configItem{key: "MinFileSize", value: fmt.Sprintf("%d bytes", c.MinFileSize), id: "minfilesize"},
-			configItem{key: "SampleSizeBinaryCompare", value: fmt.Sprintf("%d bytes", c.SampleSizeBinaryCompare), id: "samplesize"},
+			configItem{key: "[1] Debug", value: fmt.Sprintf("%v", c.Debug), id: "debug"},
+			configItem{key: "[2] DryRun", value: fmt.Sprintf("%v", c.DryRun), id: "dryrun"},
+			configItem{key: "[3] MinFileSize", value: fmt.Sprintf("%d bytes", c.MinFileSize), id: "minfilesize"},
+			configItem{key: "[4] SampleSizeBinaryCompare", value: fmt.Sprintf("%d bytes", c.SampleSizeBinaryCompare), id: "samplesize"},
 			configItem{key: "Database", value: m.app.GetIndex().GetIndexPath(), id: "database"},
 		}
 		return configLoadedMsg{items}
@@ -633,12 +745,32 @@ func (m mainModel) updateSubView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m mainModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Get flattened items for navigation and selection
+func (m mainModel) getFilteredGroups() []core.ResultList {
+	var filtered []core.ResultList
+	for _, group := range m.results {
+		match := false
+		for _, guid := range group.FileGuids {
+			file := m.app.GetIndex().GetFileByGuid(guid)
+			if file != nil {
+				if m.dupeFilter == "" || strings.Contains(strings.ToLower(file.Path), strings.ToLower(m.dupeFilter)) {
+					match = true
+					break
+				}
+			}
+		}
+		if match {
+			filtered = append(filtered, group)
+		}
+	}
+	return filtered
+}
+
+func (m mainModel) flattenGroups(groups []core.ResultList) ([]resultItem, []*core.FileItem) {
 	var allItems []resultItem
 	var allFiles []*core.FileItem
 
-	for gIdx, group := range m.results {
+	for i := range groups {
+		group := &groups[i]
 		groupMatch := false
 		var groupItems []resultItem
 
@@ -650,7 +782,7 @@ func (m mainModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					groupItems = append(groupItems, resultItem{
 						isHeader: false,
 						file:     file,
-						group:    &m.results[gIdx],
+						group:    group,
 					})
 					allFiles = append(allFiles, file)
 				}
@@ -661,14 +793,33 @@ func (m mainModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			allItems = append(allItems, resultItem{
 				isHeader: true,
 				hash:     group.HashSum,
-				group:    &m.results[gIdx],
+				group:    group,
 			})
 			allItems = append(allItems, groupItems...)
 		}
 	}
+	return allItems, allFiles
+}
 
-	start, end := m.paginator.GetSliceBounds(len(allItems))
-	pagedItems := allItems[start:end]
+func (m mainModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	filteredGroups := m.getFilteredGroups()
+
+	// Update paginator
+	m.paginator.PerPage = (m.height - 12) / 4
+	if m.paginator.PerPage < 1 {
+		m.paginator.PerPage = 1
+	}
+	m.paginator.TotalPages = (len(filteredGroups) + m.paginator.PerPage - 1) / m.paginator.PerPage
+
+	// Current page items
+	start, end := m.paginator.GetSliceBounds(len(filteredGroups))
+	pageGroups := filteredGroups[start:end]
+	pagedItems, _ := m.flattenGroups(pageGroups)
+
+	// Total filtered items (for actions like trash/delete/export)
+	_, allFiles := m.flattenGroups(filteredGroups)
+
+	oldPage := m.paginator.Page
 
 	switch msg.String() {
 	case "esc", "q":
@@ -679,7 +830,10 @@ func (m mainModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.dupeCursor--
 		} else if m.paginator.Page > 0 {
 			m.paginator.Page--
-			m.dupeCursor = m.paginator.PerPage - 1
+			// Need to calculate dupeCursor for the new page (last item)
+			newStart, newEnd := m.paginator.GetSliceBounds(len(filteredGroups))
+			newPagedItems, _ := m.flattenGroups(filteredGroups[newStart:newEnd])
+			m.dupeCursor = len(newPagedItems) - 1
 		}
 		return m, nil
 	case "down", "j":
@@ -700,11 +854,7 @@ func (m mainModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(pagedItems) > 0 && m.dupeCursor < len(pagedItems) {
 			item := pagedItems[m.dupeCursor]
 			if item.isHeader {
-				// Toggle whole group (except first one which is original, maybe?
-				// Actually requirement says "checks/unchecks each file in the group which is a duplicate file"
-				// Usually this means all except the first one.
-
-				// Let's find if any in group (except first) is unchecked
+				// Toggle whole group (except first one which is original)
 				anyUnchecked := false
 				for i, guid := range item.group.FileGuids {
 					if i == 0 {
@@ -740,6 +890,48 @@ func (m mainModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case "A":
+		// Toggle auto switch: everything checked gets unchecked and vice versa
+		for _, group := range m.results {
+			for _, guid := range group.FileGuids {
+				m.selectedDupes[guid] = !m.selectedDupes[guid]
+			}
+		}
+		return m, nil
+	case "x", "X":
+		if len(pagedItems) > 0 && m.dupeCursor < len(pagedItems) {
+			item := pagedItems[m.dupeCursor]
+			if msg.String() == "X" {
+				// Shift+X: Toggle only current group
+				anyUnchecked := false
+				for _, guid := range item.group.FileGuids {
+					if !m.selectedDupes[guid] {
+						anyUnchecked = true
+						break
+					}
+				}
+				for _, guid := range item.group.FileGuids {
+					m.selectedDupes[guid] = anyUnchecked
+				}
+			} else {
+				// x: Toggle all items
+				anyUnchecked := false
+				for _, f := range allFiles {
+					if !m.selectedDupes[f.Guid] {
+						anyUnchecked = true
+						break
+					}
+				}
+				for _, f := range allFiles {
+					m.selectedDupes[f.Guid] = anyUnchecked
+				}
+			}
+		}
+		return m, nil
+	case "t":
+		return m, m.trashSelected(allFiles)
+	case "d":
+		return m, m.deleteSelected(allFiles)
 	case "e":
 		return m, m.exportSelected(allFiles)
 	case "m":
@@ -748,12 +940,13 @@ func (m mainModel) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.textInput.Focus()
 		m.textInput.SetValue("")
 		return m, nil
-	case "t":
-		return m, m.trashSelected(allFiles)
 	}
 
 	var cmd tea.Cmd
 	m.paginator, cmd = m.paginator.Update(msg)
+	if m.paginator.Page != oldPage {
+		m.dupeCursor = 0
+	}
 	return m, cmd
 }
 
@@ -767,6 +960,8 @@ func (m mainModel) updateFiltering(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			m.dupeFilter = m.textInput.Value()
 			m.state = resultsState
+			m.paginator.Page = 0
+			m.dupeCursor = 0
 			return m, nil
 		}
 	}
@@ -828,7 +1023,35 @@ func (m mainModel) moveSelected(dest string) tea.Cmd {
 			delete(m.selectedDupes, file.Guid)
 		}
 
-		return messageMsg{title: "Success", content: fmt.Sprintf("Moved %d files to %s.", count, dest)}
+		// Update results without full re-scan
+		var newResults []core.ResultList
+		for _, group := range m.results {
+			var newGuids []string
+			for _, guid := range group.FileGuids {
+				deleted := false
+				for _, s := range selected {
+					if s.Guid == guid {
+						deleted = true
+						break
+					}
+				}
+				if !deleted {
+					newGuids = append(newGuids, guid)
+				}
+			}
+			if len(newGuids) >= 2 {
+				newResults = append(newResults, core.ResultList{
+					HashSum:   group.HashSum,
+					FileGuids: newGuids,
+				})
+			}
+		}
+
+		return messageMsg{
+			title:   "Success",
+			content: fmt.Sprintf("Moved %d files to %s.", count, dest),
+			results: newResults,
+		}
 	}
 }
 
@@ -837,15 +1060,6 @@ func (m mainModel) View() string {
 		return ""
 	}
 
-	header := titleStyle.Render(" DupeFiles v0.1.4 ")
-
-	// Get file count for footer
-	fileCount := 0
-	if m.app != nil && m.app.GetIndex() != nil {
-		fileCount = len(m.app.GetIndex().GetAllFiles())
-	}
-	footer := statusStyle.Render(fmt.Sprintf(" %d files indexed ", fileCount))
-
 	var content string
 	switch m.state {
 	case menuState:
@@ -853,29 +1067,31 @@ func (m mainModel) View() string {
 	case indexState:
 		content = m.indexList.View()
 	case scanningState:
-		content = fmt.Sprintf("\n\n  %s Scanning for duplicates...\n\n  Press q to cancel", m.spinner.View())
+		content = fmt.Sprintf("\n  %s\n\n  %s Scanning for duplicates...\n\n  Press q to cancel", pinkTitleStyle.Render(" Scanning "), m.spinner.View())
 	case resultsState:
 		content = m.resultsView()
 	case filesState:
 		content = m.filesList.View()
 	case addingPathState:
-		content = fmt.Sprintf("\n  Add Path\n\n%s\n\n(esc to cancel, enter to confirm)", m.textInput.View())
+		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", greenTitleStyle.Render(" Add Path "), m.textInput.View())
 	case removingPathState:
-		content = fmt.Sprintf("\n  Remove Path (matches index path)\n\n%s\n\n(esc to cancel, enter to confirm)", m.textInput.View())
+		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", greenTitleStyle.Render(" Remove Path "), m.textInput.View())
 	case configState:
 		content = m.configList.View()
 	case confirmClearState:
-		content = "\n\n  Are you sure you want to clear the entire index?\n\n  (y)es / (n)o"
+		content = fmt.Sprintf("\n  %s\n\n  Are you sure you want to clear the entire index?\n\n  (y)es / (n)o", greenTitleStyle.Render(" Clear Index "))
 	case filteringState:
-		content = fmt.Sprintf("\n  Filter Duplicates\n\n%s\n\n(esc to cancel, enter to confirm)", m.textInput.View())
+		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", blueTitleStyle.Render(" Filter Duplicates "), m.textInput.View())
 	case movingState:
-		content = fmt.Sprintf("\n  Move Selected Files\n\n%s\n\n(esc to cancel, enter to confirm)", m.textInput.View())
+		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", blueTitleStyle.Render(" Move Selected Files "), m.textInput.View())
+	case editingConfigState:
+		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", orangeTitleStyle.Render(" Edit Config "), m.textInput.View())
 	case messageState:
 		content = fmt.Sprintf("\n  %s\n\n  %s\n\n  Press esc to go back", m.msgTitle, m.msgContent)
 	}
 
 	// Simple vertical join with some padding
-	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+	return content
 }
 
 func (m mainModel) startScan() tea.Cmd {
@@ -896,68 +1112,37 @@ func (m mainModel) resultsView() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("\n  Show Duplicates (Interactive)\n\n")
+	sb.WriteString("\n  " + blueTitleStyle.Render(" Results (Interactive) ") + "\n\n")
 
 	// Filtering
 	if m.dupeFilter != "" {
 		sb.WriteString(fmt.Sprintf("  Filter: %s\n", m.dupeFilter))
 	}
 
-	// Get filtered and flattened results for paginator
-	var allItems []resultItem
-	for gIdx, group := range m.results {
-		groupMatch := false
-		var groupItems []resultItem
-
-		for _, guid := range group.FileGuids {
-			file := m.app.GetIndex().GetFileByGuid(guid)
-			if file != nil {
-				if m.dupeFilter == "" || strings.Contains(strings.ToLower(file.Path), strings.ToLower(m.dupeFilter)) {
-					groupMatch = true
-					groupItems = append(groupItems, resultItem{
-						isHeader: false,
-						file:     file,
-						group:    &m.results[gIdx],
-					})
-				}
-			}
-		}
-
-		if groupMatch {
-			allItems = append(allItems, resultItem{
-				isHeader: true,
-				hash:     group.HashSum,
-				group:    &m.results[gIdx],
-			})
-			allItems = append(allItems, groupItems...)
-		}
+	filteredGroups := m.getFilteredGroups()
+	m.paginator.PerPage = (m.height - 12) / 4
+	if m.paginator.PerPage < 1 {
+		m.paginator.PerPage = 1
 	}
+	m.paginator.TotalPages = (len(filteredGroups) + m.paginator.PerPage - 1) / m.paginator.PerPage
 
-	m.paginator.TotalPages = (len(allItems) + m.paginator.PerPage - 1) / m.paginator.PerPage
 	if m.paginator.Page >= m.paginator.TotalPages && m.paginator.TotalPages > 0 {
 		m.paginator.Page = m.paginator.TotalPages - 1
 	}
 
-	start, end := m.paginator.GetSliceBounds(len(allItems))
-	pagedItems := allItems[start:end]
+	// Current page items
+	start, end := m.paginator.GetSliceBounds(len(filteredGroups))
+	pageGroups := filteredGroups[start:end]
+	pagedItems, _ := m.flattenGroups(pageGroups)
+
+	// Total filtered items
+	allItems, _ := m.flattenGroups(filteredGroups)
 
 	if len(allItems) == 0 {
 		sb.WriteString("  No files match filter.\n")
 	} else {
 		// Calculate starting group counter for the current page
-		groupCounter := 0
-		if start > 0 {
-			// Count groups before the start of the page
-			var lastG *core.ResultList
-			for i := 0; i < start; i++ {
-				if allItems[i].group != lastG {
-					lastG = allItems[i].group
-					groupCounter++
-				}
-			}
-			// Adjust so that the current group (which may have started before 'start') is counted
-			groupCounter-- // It will be incremented in the loop
-		}
+		groupCounter := m.paginator.Page * m.paginator.PerPage
 
 		var lastGroup *core.ResultList
 
@@ -972,11 +1157,22 @@ func (m mainModel) resultsView() string {
 				cursor = ">"
 			}
 
-			colorIdx := groupCounter % len(hashColors)
+			colorIdx := (groupCounter - 1) % len(hashColors)
+			if colorIdx < 0 {
+				colorIdx = 0
+			}
 			style := lipgloss.NewStyle().Foreground(hashColors[colorIdx])
 
 			if item.isHeader {
-				sb.WriteString(fmt.Sprintf(" %s %s\n", cursor, style.Render(fmt.Sprintf("Hash: %s", item.hash))))
+				// Get size from first file in group
+				sizeStr := ""
+				if len(item.group.FileGuids) > 0 {
+					firstFile := m.app.GetIndex().GetFileByGuid(item.group.FileGuids[0])
+					if firstFile != nil {
+						sizeStr = fmt.Sprintf(" (%s)", firstFile.HumanizedSize)
+					}
+				}
+				sb.WriteString(fmt.Sprintf(" %s %s%s\n", cursor, style.Render(fmt.Sprintf("Hash: %s", item.hash)), sizeStr))
 			} else {
 				checked := " "
 				if m.selectedDupes[item.file.Guid] {
@@ -992,13 +1188,13 @@ func (m mainModel) resultsView() string {
 					fileStyle = fileStyle.Foreground(lipgloss.Color("7")) // Gray/White for dupes
 				}
 
-				sb.WriteString(fmt.Sprintf(" %s   [%s] %s (%s)\n", cursor, checked, fileStyle.Render(item.file.Path), item.file.HumanizedSize))
+				sb.WriteString(fmt.Sprintf(" %s   [%s] %s\n", cursor, checked, fileStyle.Render(item.file.Path)))
 			}
 		}
 	}
 
 	sb.WriteString(fmt.Sprintf("\n  Page %d of %d (%d items total)\n", m.paginator.Page+1, m.paginator.TotalPages, len(allItems)))
-	sb.WriteString("\n  [↑/↓] navigate • [space] select • [a] auto • [f] filter • [e] export • [m] move • [t] trash • [esc] back\n")
+	sb.WriteString("\n  [↑/↓] navigate • [←/→] page • [space] select • [x/X] toggle all/group • [a/A] auto/inv • [f] filter • [e] export • [m] move • [t] trash • [d] delete • [esc] back\n")
 
 	return sb.String()
 }
@@ -1058,7 +1254,89 @@ func (m mainModel) trashSelected(allFiles []*core.FileItem) tea.Cmd {
 			delete(m.selectedDupes, file.Guid)
 		}
 
-		return messageMsg{title: "Success", content: fmt.Sprintf("Moved %d files to trash.", count)}
+		// Update results without full re-scan
+		var newResults []core.ResultList
+		for _, group := range m.results {
+			var newGuids []string
+			for _, guid := range group.FileGuids {
+				deleted := false
+				for _, s := range selected {
+					if s.Guid == guid {
+						deleted = true
+						break
+					}
+				}
+				if !deleted {
+					newGuids = append(newGuids, guid)
+				}
+			}
+			if len(newGuids) >= 2 {
+				newResults = append(newResults, core.ResultList{
+					HashSum:   group.HashSum,
+					FileGuids: newGuids,
+				})
+			}
+		}
+
+		return messageMsg{
+			title:   "Success",
+			content: fmt.Sprintf("Moved %d files to trash.", count),
+			results: newResults,
+		}
+	}
+}
+
+func (m mainModel) deleteSelected(allFiles []*core.FileItem) tea.Cmd {
+	return func() tea.Msg {
+		var selected []*core.FileItem
+		for _, file := range allFiles {
+			if m.selectedDupes[file.Guid] {
+				selected = append(selected, file)
+			}
+		}
+		if len(selected) == 0 {
+			return messageMsg{title: "Delete", content: "No files selected for deletion."}
+		}
+
+		count, err := m.app.DeleteFiles(selected)
+		if err != nil {
+			return messageMsg{title: "Error", content: fmt.Sprintf("Error deleting files: %v", err)}
+		}
+
+		// Clear selection after action
+		for _, file := range selected {
+			delete(m.selectedDupes, file.Guid)
+		}
+
+		// Update results without full re-scan
+		var newResults []core.ResultList
+		for _, group := range m.results {
+			var newGuids []string
+			for _, guid := range group.FileGuids {
+				deleted := false
+				for _, s := range selected {
+					if s.Guid == guid {
+						deleted = true
+						break
+					}
+				}
+				if !deleted {
+					newGuids = append(newGuids, guid)
+				}
+			}
+			if len(newGuids) >= 2 {
+				newResults = append(newResults, core.ResultList{
+					HashSum:   group.HashSum,
+					FileGuids: newGuids,
+				})
+			}
+		}
+
+		return messageMsg{
+			title:   "Success",
+			content: fmt.Sprintf("Deleted %d files.", count),
+			results: newResults,
+		}
 	}
 }
 

@@ -29,72 +29,89 @@ go build -o df
 
 ## Commands
 
-### Add directory and immediately scan it
+### Interactive Modes
+
+#### TUI Mode (Terminal User Interface)
+Starts an interactive terminal interface to manage files and duplicates. This is the default mode if no flags are provided.
+```bash
+./df --tui
+# or simply
+./df
+```
+
+#### Webserver Mode
+Starts a web interface on the specified port (default 8080).
+```bash
+./df --webserver
+./df --webserver --port 9000
+```
+
+### Quick Start
+Add a directory and immediately scan it:
 ```bash
 ./df --qs /path/to/directory
 ```
 
 ### Scan for Duplicates
 ```bash
-# Default behavior - scan for duplicates
-./df
-
-# Explicit scan command
+# Start scanning files already in the database
 ./df --scan
-```
-
-### Add Files to Index
-
-#### Add a single file
-```bash
-./df --add /path/to/file.txt
-```
-
-#### Add a directory (recursive by default)
-```bash
-./df --add /path/to/directory
-```
-
-#### Add directory with file filter (e.g., only MP4 files)
-```bash
-./df --add /path/to/videos *.mp4
 ```
 
 ### Index Management
 
-#### Show configuration (index file location, etc.)
+#### Add Files to Index
 ```bash
+# Add a single file
+./df --add /path/to/file.txt
+
+# Add a directory (recursive)
+./df --add /path/to/directory
+
+# Add directory with file filter (e.g., only MP4 files)
+./df --add /path/to/videos *.mp4
+```
+
+#### Remove Files from Index
+```bash
+./df --remove /path/to/directory
+```
+
+#### Maintenance
+```bash
+# Show configuration (index file location, etc.)
 ./df --config
-```
 
-#### List all files in the index
-```bash
+# List all files in the index
 ./df --files
-```
 
-#### List all duplicate files in the index
-```bash
+# List all duplicate files in the index
 ./df --dupes
-```
 
-#### Show file hashes in the database
-```bash
+# Show file hashes in the database
 ./df --hashes
+
+# Update file hashes in the index
+./df --updateIndex
+
+# Remove non-existent files from index
+./df --purgeIndex
+
+# Clear all files from the database
+./df --clear
 ```
 
-#### Update files in the index
-```bash
-./df --update
-```
+### Exporting Results
 
-#### Remove non-existent files from index
-```bash
-./df --purge
-```
-
-#### Export duplicate files to a text file
+#### Export to STDOUT
 ```bash
 ./df --export > duplicates.txt
+```
+
+#### Export to File (JSON or CSV)
+```bash
+./df --export-json results.json
+./df --export-csv results.csv
 ```
 
 ### Duplicate File Management
@@ -109,7 +126,7 @@ go build -o df
 ./df --trash
 ```
 
-Note: on removable media like USB or SSD drives this currently does not work, because the app is trying to move the external files to the local trash. Instead you have to use --move /external/trash.directory/
+Note: on removable media like USB or SSD drives this currently does not work, because the app is trying to move the external files to the local trash. Instead you have to use `--move /external/trash.directory/`.
 
 #### Remove duplicate files from database
 ```bash
@@ -121,9 +138,11 @@ Note: on removable media like USB or SSD drives this currently does not work, be
 ./df --headshot
 ```
 
-### Debug Mode
-
 #### Enable debug mode
 ```bash
 ./df --debug
 ```
+
+## License
+
+Copyright (c) 2025 dh

@@ -11,6 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var sDupeFilesInfo = "DupeFiles v0.2.0 - Copyright (c) 2025 dh"
+
 func main() {
 	// flags
 	var (
@@ -74,7 +76,7 @@ func main() {
 		return
 	}
 
-	fmt.Println("DupeFiles v0.1.4 - Copyright (c) 2025 dh")
+	fmt.Println(sDupeFilesInfo)
 
 	switch {
 	case *showConfig:

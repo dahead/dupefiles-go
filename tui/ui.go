@@ -87,7 +87,6 @@ const (
 	indexState
 	addingPathState
 	removingPathState
-	confirmClearState
 	messageState
 	filteringState
 	movingState
@@ -121,9 +120,11 @@ var indexMenuActions = []menuAction{
 }
 
 type messageMsg struct {
-	title   string
-	content string
-	results []core.ResultList
+	title    string
+	content  string
+	results  []core.ResultList
+	buttons  []string
+	onSelect func(int) tea.Cmd
 }
 
 type item struct {
@@ -181,6 +182,9 @@ type mainModel struct {
 	editingConfigID string
 	msgTitle        string
 	msgContent      string
+	msgButtons      []string
+	msgActiveButton int
+	msgOnSelect     func(int) tea.Cmd
 	loadingMsg      string
 	loadingPercent  float64
 	quitting        bool
@@ -367,9 +371,16 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case messageMsg:
+		if msg.title == "goto_index" {
+			m.state = indexState
+			return m, nil
+		}
 		m.state = messageState
 		m.msgTitle = msg.title
 		m.msgContent = msg.content
+		m.msgButtons = msg.buttons
+		m.msgActiveButton = 0
+		m.msgOnSelect = msg.onSelect
 		if msg.results != nil {
 			m.results = msg.results
 		}
@@ -404,8 +415,6 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateConfig(msg)
 	case editingConfigState:
 		return m.updateEditingConfig(msg)
-	case confirmClearState:
-		return m.updateConfirmClear(msg)
 	case filteringState:
 		return m.updateFiltering(msg)
 	case movingState:
@@ -448,6 +457,23 @@ func (m mainModel) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m mainModel) handleMainAction(id string) (tea.Model, tea.Cmd) {
 	switch id {
 	case "scan":
+		if len(m.app.GetIndex().GetAllFiles()) == 0 {
+			return m, func() tea.Msg {
+				return messageMsg{
+					title:   "Database Empty",
+					content: "The database is empty. Would you like to add a path first?",
+					buttons: []string{"Yes", "No"},
+					onSelect: func(i int) tea.Cmd {
+						if i == 0 { // Yes
+							return func() tea.Msg {
+								return messageMsg{title: "goto_index"} // Special msg to trigger state change
+							}
+						}
+						return nil
+					},
+				}
+			}
+		}
 		m.state = scanningState
 		return m, tea.Batch(m.startScan(), m.progress.SetPercent(0))
 	case "index":
@@ -533,8 +559,21 @@ func (m mainModel) handleIndexAction(id string) (tea.Model, tea.Cmd) {
 		m.loadingMsg = "Updating index..."
 		return m, m.updateIndex()
 	case "clear":
-		m.state = confirmClearState
-		return m, nil
+		return m, func() tea.Msg {
+			return messageMsg{
+				title:   "Clear Index",
+				content: "Are you sure you want to clear the entire index?",
+				buttons: []string{"Yes", "No"},
+				onSelect: func(i int) tea.Cmd {
+					if i == 0 { // Yes
+						return func() tea.Msg {
+							return tea.Cmd(m.clearIndex())() // execute and return
+						}
+					}
+					return nil
+				},
+			}
+		}
 	}
 	return m, nil
 }
@@ -595,6 +634,12 @@ func (m mainModel) updateAddingPath(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m mainModel) updateBrowsing(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		m.paginator.PerPage = m.height - 10
+		if m.paginator.PerPage < 1 {
+			m.paginator.PerPage = 1
+		}
+		m.paginator.TotalPages = (len(m.browserFiles) + m.paginator.PerPage - 1) / m.paginator.PerPage
+
 		switch msg.String() {
 		case "esc":
 			m.state = indexState
@@ -602,17 +647,34 @@ func (m mainModel) updateBrowsing(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.browserCursor > 0 {
 				m.browserCursor--
+				if m.browserCursor < m.paginator.Page*m.paginator.PerPage {
+					m.paginator.PrevPage()
+				}
 			}
+			return m, nil
 		case "down", "j":
 			if m.browserCursor < len(m.browserFiles)-1 {
 				m.browserCursor++
+				if m.browserCursor >= (m.paginator.Page+1)*m.paginator.PerPage {
+					m.paginator.NextPage()
+				}
 			}
+			return m, nil
+		case "left", "h", "pgup":
+			m.paginator.PrevPage()
+			m.browserCursor = m.paginator.Page * m.paginator.PerPage
+			return m, nil
+		case "right", "l", "pgdown":
+			m.paginator.NextPage()
+			m.browserCursor = m.paginator.Page * m.paginator.PerPage
+			return m, nil
 		case " ":
 			path := filepath.Join(m.browserDir, m.browserFiles[m.browserCursor].name)
 			if m.browserFiles[m.browserCursor].name == ".." {
 				return m, nil
 			}
 			m.browserSelected[path] = !m.browserSelected[path]
+			return m, nil
 		case "enter":
 			item := m.browserFiles[m.browserCursor]
 			if item.name == ".." {
@@ -633,6 +695,8 @@ func (m mainModel) updateBrowsing(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dirLoadedMsg:
 		m.browserFiles = msg.files
 		m.browserCursor = 0
+		m.paginator.Page = 0
+		m.paginator.TotalPages = (len(m.browserFiles) + m.paginator.PerPage - 1) / m.paginator.PerPage
 		return m, nil
 	}
 	return m, nil
@@ -905,34 +969,69 @@ func (m mainModel) updateScanning(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m mainModel) updateConfirmClear(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "y", "Y", "enter":
-			m.state = loadingState
-			m.loadingPercent = 0
-			m.loadingMsg = "Clearing index..."
-			return m, m.clearIndex()
-		case "n", "N", "esc", "backspace":
-			m.state = menuState
-			return m, nil
-		}
-	}
-	return m, nil
-}
-
 func (m mainModel) updateSubView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.state == resultsState {
 			return m.updateResults(msg)
 		}
+
+		if m.state == messageState {
+			switch msg.String() {
+			case "tab", "right", "l":
+				if len(m.msgButtons) > 1 {
+					m.msgActiveButton = (m.msgActiveButton + 1) % len(m.msgButtons)
+				}
+				return m, nil
+			case "left", "h":
+				if len(m.msgButtons) > 1 {
+					m.msgActiveButton--
+					if m.msgActiveButton < 0 {
+						m.msgActiveButton = len(m.msgButtons) - 1
+					}
+				}
+				return m, nil
+			case "k", "up":
+				// ignore
+				return m, nil
+			case "j", "down":
+				// ignore
+				return m, nil
+			case "enter", " ", "y", "Y":
+				var cmd tea.Cmd
+				if m.msgOnSelect != nil {
+					if msg.String() == "y" || msg.String() == "Y" {
+						cmd = m.msgOnSelect(0) // Assume 0 is Yes
+					} else {
+						cmd = m.msgOnSelect(m.msgActiveButton)
+					}
+				}
+				if cmd == nil {
+					m.state = menuState
+				}
+				return m, cmd
+			case "n", "N":
+				if len(m.msgButtons) > 1 {
+					var cmd tea.Cmd
+					if m.msgOnSelect != nil {
+						cmd = m.msgOnSelect(1) // Assume 1 is No
+					}
+					if cmd == nil {
+						m.state = menuState
+					}
+					return m, cmd
+				}
+				return m, nil
+			case "esc", "backspace", "q":
+				m.state = menuState
+				return m, nil
+			}
+			return m, nil
+		}
+
 		if msg.String() == "esc" || msg.String() == "backspace" || msg.String() == "q" || msg.String() == "enter" {
 			if m.state == indexState {
 				m.state = menuState
-			} else if m.state == messageState {
-				m.state = menuState // Default back to menu from message
 			} else {
 				m.state = menuState
 			}
@@ -1267,19 +1366,13 @@ func (m mainModel) browsingView() string {
 	s := greenTitleStyle.Render("Browse Path") + "\n\n"
 	s += fmt.Sprintf("Current Directory: %s\n\n", m.browserDir)
 
-	maxItems := m.height - 10
-	if maxItems < 1 {
-		maxItems = 1
+	m.paginator.PerPage = m.height - 10
+	if m.paginator.PerPage < 1 {
+		m.paginator.PerPage = 1
 	}
+	m.paginator.TotalPages = (len(m.browserFiles) + m.paginator.PerPage - 1) / m.paginator.PerPage
 
-	start := 0
-	if m.browserCursor >= maxItems {
-		start = m.browserCursor - maxItems + 1
-	}
-	end := start + maxItems
-	if end > len(m.browserFiles) {
-		end = len(m.browserFiles)
-	}
+	start, end := m.paginator.GetSliceBounds(len(m.browserFiles))
 
 	for i := start; i < end; i++ {
 		item := m.browserFiles[i]
@@ -1311,20 +1404,31 @@ func (m mainModel) browsingView() string {
 		}
 	}
 
-	if len(m.browserFiles) > maxItems {
-		s += fmt.Sprintf("\n ... (%d more) ...\n", len(m.browserFiles)-maxItems)
-	}
+	s += fmt.Sprintf("\n  Page %d of %d (%d items total)\n", m.paginator.Page+1, m.paginator.TotalPages, len(m.browserFiles))
 
-	s += "\n (space) select • (enter) navigate • (a) add selected • (esc/enter) back"
+	s += "\n (space) select • (enter) navigate • (a) add selected • (esc) back"
 	return s
 }
 
 func (m mainModel) dialogView() string {
 	title := titleStyle.Render(m.msgTitle)
 	content := m.msgContent
-	button := buttonStyle.Render(" OK ")
 
-	ui := lipgloss.JoinVertical(lipgloss.Center, title, "", content, button)
+	var buttons []string
+	if len(m.msgButtons) == 0 {
+		buttons = append(buttons, buttonStyle.Render(" OK "))
+	} else {
+		for i, b := range m.msgButtons {
+			style := buttonStyle.Copy().Background(lipgloss.Color("#3C3C3C"))
+			if i == m.msgActiveButton {
+				style = buttonStyle.Copy()
+			}
+			buttons = append(buttons, style.Render(fmt.Sprintf(" %s ", b)))
+		}
+	}
+
+	buttonsRow := lipgloss.JoinHorizontal(lipgloss.Center, buttons...)
+	ui := lipgloss.JoinVertical(lipgloss.Center, title, "", content, "", buttonsRow)
 	dialog := dialogStyle.Render(ui)
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
@@ -1353,8 +1457,6 @@ func (m mainModel) View() string {
 		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", greenTitleStyle.Render(" Remove Path "), m.textInput.View())
 	case configState:
 		content = m.configList.View()
-	case confirmClearState:
-		content = fmt.Sprintf("\n  %s\n\n  Are you sure you want to clear the entire index?\n\n  (y)es / (n)o", greenTitleStyle.Render(" Clear Index "))
 	case filteringState:
 		content = fmt.Sprintf("\n  %s\n\n%s\n\n(esc to cancel, enter to confirm)", blueTitleStyle.Render(" Filter Duplicates "), m.textInput.View())
 	case movingState:
@@ -1370,7 +1472,6 @@ func (m mainModel) View() string {
 		return m.dialogView()
 	}
 
-	// Simple vertical join with some padding
 	return content
 }
 
@@ -1425,9 +1526,9 @@ func (m mainModel) resultsView() string {
 	pagedItems, _ := m.flattenGroups(pageGroups)
 
 	// Total filtered items
-	allItems, _ := m.flattenGroups(filteredGroups)
+	_, allFiles := m.flattenGroups(filteredGroups)
 
-	if len(allItems) == 0 {
+	if len(allFiles) == 0 {
 		sb.WriteString("  No files match filter.\n")
 	} else {
 		// Calculate starting group counter for the current page
@@ -1482,7 +1583,7 @@ func (m mainModel) resultsView() string {
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("\n  Page %d of %d (%d items total)\n", m.paginator.Page+1, m.paginator.TotalPages, len(allItems)))
+	sb.WriteString(fmt.Sprintf("\n  Page %d of %d (%d items total)\n", m.paginator.Page+1, m.paginator.TotalPages, len(allFiles)))
 	sb.WriteString("\n  [↑/↓] navigate • [←/→] page • [space] select • [x/X] toggle all/group • [a/A] auto/inv • [f] filter • [e] export • [m] move • [t] trash • [d] delete • [esc] back\n")
 
 	return sb.String()

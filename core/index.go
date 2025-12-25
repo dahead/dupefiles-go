@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -246,7 +245,6 @@ func (idx *Index) Close() error {
 	return idx.db.Close()
 }
 
-// Todo: integrate or remove
 func (idx *Index) Clear() error {
 	_, err := idx.db.Exec("DELETE FROM files")
 	if err != nil {
@@ -257,162 +255,6 @@ func (idx *Index) Clear() error {
 		return err
 	}
 	idx.files = make(map[string]*FileItem)
-	return nil
-}
-
-func (idx *Index) AddFile(path string) error {
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-
-	if fileInfo.IsDir() {
-		return nil
-	}
-
-	minFileSize := idx.config.MinFileSize
-	if minFileSize > 0 && fileInfo.Size() < minFileSize {
-		fmt.Printf("Skipping %s (size: %d)\n", path, fileInfo.Size()) // Can be verbose
-		return nil
-	}
-
-	guid := filepath.Clean(path)
-	extension := strings.TrimPrefix(filepath.Ext(path), ".")
-	modTime := fileInfo.ModTime().Unix()
-
-	// Check if file with same path and modTime already exists and is similar
-	// This is a simple check; more complex logic could compare hashes if sizes match
-	if existingFile, exists := idx.files[guid]; exists {
-		if existingFile.Size == fileInfo.Size() && existingFile.ModTime == modTime {
-			// fmt.Printf("Skipping unchanged file: %s\n", path) // Can be verbose
-			return nil // Skip if path, size, and modTime match
-		}
-	}
-
-	// create new fileitem
-	file := &FileItem{
-		Guid:          guid,
-		Path:          path,
-		Extension:     extension,
-		Size:          fileInfo.Size(),
-		HumanizedSize: HumanizeBytes(fileInfo.Size()),
-		ModTime:       modTime,
-		Hash:          sql.NullString{String: "", Valid: false}, // Hash will be calculated on demand or during scan
-	}
-
-	// add to index
-	idx.files[guid] = file
-
-	// add to database
-	_, err = idx.db.Exec(
-		"INSERT OR REPLACE INTO files (guid, path, extension, size, mod_time, hash, humanized_size) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		file.Guid, file.Path, file.Extension, file.Size, file.ModTime, file.Hash, file.HumanizedSize,
-	)
-	return err
-}
-
-// Todo: move the file retrieval outside this function
-// Here we just add the files to the index
-func (idx *Index) AddDirectory(dirPath string, recursive bool, filter string) error {
-	fileInfo, err := os.Stat(dirPath)
-	if err != nil {
-		return err
-	}
-	if !fileInfo.IsDir() {
-		return fmt.Errorf("%s is not a directory", dirPath)
-	}
-
-	// Begin transaction
-	tx, err := idx.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction for AddDirectory: %v", err)
-	}
-	defer tx.Rollback() // Rollback if not committed
-
-	// Prepare statement for batch inserts
-	stmt, err := tx.Prepare("INSERT OR REPLACE INTO files (guid, path, extension, size, mod_time, hash, humanized_size) VALUES (?, ?, ?, ?, ?, ?, ?)")
-	if err != nil {
-		return fmt.Errorf("failed to prepare insert statement for AddDirectory: %v", err)
-	}
-	defer stmt.Close()
-
-	walkFunc := func(path string, info os.FileInfo, errWalk error) error {
-		if errWalk != nil {
-			fmt.Printf("Warning: Error accessing %s: %v\n", path, errWalk)
-			return nil
-		}
-		if info.IsDir() {
-			if !recursive && path != dirPath {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		// is a filter set? check for it
-		if filter != "" {
-			matched, errMatch := filepath.Match(filter, filepath.Base(path))
-			if errMatch != nil {
-				fmt.Printf("Warning: Error matching filter for %s: %v\n", path, errMatch)
-				return errMatch // Propagate match error
-			}
-			if !matched {
-				return nil
-			}
-		}
-
-		// Check minimum file size
-		minFileSize := idx.config.MinFileSize
-		if minFileSize > 0 && info.Size() < minFileSize {
-			return nil
-		}
-
-		// get file info
-		guid := filepath.Clean(path)
-		extension := strings.TrimPrefix(filepath.Ext(path), ".")
-		modTime := info.ModTime().Unix()
-
-		// Check if file with same path and modTime already exists and is similar
-		if existingFile, exists := idx.files[guid]; exists {
-			if existingFile.Size == info.Size() && existingFile.ModTime == modTime {
-				return nil // Skip if path, size, and modTime match
-			}
-		}
-
-		// Create new fileitem
-		file := &FileItem{
-			Guid:          guid,
-			Path:          path,
-			Extension:     extension,
-			Size:          info.Size(),
-			HumanizedSize: HumanizeBytes(info.Size()),
-			ModTime:       modTime,
-			Hash:          sql.NullString{String: "", Valid: false}, // Hash will be calculated on demand or during scan
-		}
-
-		// Add to in-memory index
-		idx.files[guid] = file
-
-		// Execute prepared statement
-		_, errExec := stmt.Exec(file.Guid, file.Path, file.Extension, file.Size, file.ModTime, file.Hash, file.HumanizedSize)
-		if errExec != nil {
-			fmt.Printf("Warning: Failed to add %s to database: %v\n", path, errExec)
-		}
-
-		return nil
-	}
-
-	// Walk the directory
-	err = filepath.Walk(dirPath, walkFunc)
-	if err != nil {
-		return fmt.Errorf("error walking directory: %v", err)
-	}
-
-	// Commit transaction
-	err = tx.Commit()
-	if err != nil {
-		return fmt.Errorf("failed to commit transaction for AddDirectory: %v", err)
-	}
-
 	return nil
 }
 

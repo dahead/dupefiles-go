@@ -50,7 +50,7 @@ func main() {
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		app.SetProgram(p)
 		if _, err := p.Run(); err != nil {
-			fmt.Printf("Alas, there's been an error: %v", err)
+			fmt.Printf("Error: %v", err)
 			os.Exit(1)
 		}
 		return
@@ -70,7 +70,7 @@ func main() {
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		app.SetProgram(p)
 		if _, err := p.Run(); err != nil {
-			fmt.Printf("Alas, there's been an error: %v", err)
+			fmt.Printf("Error: %v", err)
 			os.Exit(1)
 		}
 		return
